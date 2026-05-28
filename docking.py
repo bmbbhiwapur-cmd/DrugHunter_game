@@ -29,10 +29,28 @@ try:
     VINA_OK = True
 except ImportError:
     VINA_OK = False
+except Exception:
+    # Some systems have vina installed but fail at runtime (missing libs)
+    VINA_OK = False
 
 RESULTS_FILE  = Path("docking_results.json")
 PDB_CACHE_DIR = Path("pdb_cache")
 PDB_CACHE_DIR.mkdir(exist_ok=True)
+
+
+def health_check():
+    """
+    Returns (ok: bool, message: str).
+    Called at app startup to show a friendly error instead of a crash.
+    """
+    issues = []
+    if not RDKIT_OK:
+        issues.append("RDKit not installed — run: pip install rdkit")
+    if not VINA_OK:
+        issues.append("vina not installed — run: pip install vina")
+    if issues:
+        return False, " | ".join(issues)
+    return True, "Docking engine ready"
 
 
 # ── Lookup mode ───────────────────────────────────────────────────────────────
