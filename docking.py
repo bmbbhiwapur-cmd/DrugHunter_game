@@ -124,7 +124,15 @@ def convert_pdb_to_pdbqt(input_pdb, output_pdbqt, is_ligand=False):
             if is_ligand:
                 pdbqt.write("ROOT\n")
             for line in pdb:
-                if line.startswith(("ATOM", "HETATM")):
+                # For the RECEPTOR: keep only protein ATOM records.
+                # Drop HETATM (ligands, ions, water) and hydrogens — Vina's
+                # standard receptor prep does this, and leaving them in causes
+                # parse errors / failed runs.
+                if is_ligand:
+                    keep = line.startswith(("ATOM", "HETATM"))
+                else:
+                    keep = line.startswith("ATOM")
+                if keep:
                     record_type = line[:6].strip()
                     try:
                         atom_id = int(line[6:11].strip())
@@ -147,6 +155,9 @@ def convert_pdb_to_pdbqt(input_pdb, output_pdbqt, is_ligand=False):
                     if not element:
                         element = ''.join([c for c in atom_name if c.isalpha()])[0]
                     element = ''.join([c for c in element if c.isalpha()]).upper()
+                    # Skip hydrogens in the receptor (Vina uses united-atom receptor)
+                    if not is_ligand and element == "H":
+                        continue
                     vina_type = _ATOM_TYPE_MAP.get(element, element.title())
                     if element == "C" and "AR" in atom_name.upper():
                         vina_type = "A"
@@ -159,7 +170,7 @@ def convert_pdb_to_pdbqt(input_pdb, output_pdbqt, is_ligand=False):
                 pdbqt.write("ENDROOT\n")
                 pdbqt.write(f"TORSDOF {torsions}\n")
             else:
-                pdbqt.write("ENDMDL\n")
+                pdbqt.write("END\n")
         return True, output_pdbqt
     except Exception as e:
         return False, str(e)
@@ -208,6 +219,62 @@ def compute_protein_centroid(pdbqt_file):
     return center[0], center[1], center[2], dims[0], dims[1], dims[2]
 
 
+def find_active_site_box(pdb_file):
+    """
+    Find the binding pocket using the co-crystallized ligand in the PDB file.
+
+    Most drug-target PDB structures include the bound ligand (a HETATM that
+    isn't water/ion). Its center is the real active site — far better than
+    blind docking. This mirrors api.py's parse_bound_ligands().
+
+    Returns (cx, cy, cz, sx, sy, sz) or None if no suitable ligand found.
+    """
+    if not os.path.exists(pdb_file):
+        return None
+
+    # Common ions/buffers to ignore (not real drug-binding ligands)
+    ignore = {
+        "HOH", "WAT", "DOD", "NA", "CL", "K", "MG", "CA", "ZN", "MN", "FE",
+        "SO4", "PO4", "GOL", "EDO", "ACT", "DMS", "PEG", "FMT", "TRS", "EPE",
+        "BME", "MES", "IOD", "BR", "NO3", "CO3", "NH4", "FLC", "CIT",
+    }
+
+    ligands = {}
+    with open(pdb_file) as f:
+        for line in f:
+            if line.startswith("HETATM"):
+                res_name = line[17:20].strip()
+                if res_name in ignore:
+                    continue
+                chain = line[21].strip() or "A"
+                try:
+                    res_seq = int(line[22:26].strip())
+                    x = float(line[30:38])
+                    y = float(line[38:46])
+                    z = float(line[46:54])
+                except ValueError:
+                    continue
+                key = f"{res_name}-{chain}-{res_seq}"
+                ligands.setdefault(key, []).append((x, y, z))
+
+    if not ligands:
+        return None
+
+    # Pick the ligand with the most atoms (likely the real drug, not a fragment)
+    best_key = max(ligands, key=lambda k: len(ligands[k]))
+    pts = ligands[best_key]
+    if len(pts) < 6:  # too small to be a real drug-like ligand
+        return None
+
+    arr = np.array(pts)
+    center = np.mean(arr, axis=0)
+    # Box = ligand extent + 10 Angstrom padding, capped at 25
+    dims = np.max(arr, axis=0) - np.min(arr, axis=0) + 10.0
+    dims = np.minimum(dims, 25.0)
+    dims = np.maximum(dims, 18.0)  # minimum useful box
+    return center[0], center[1], center[2], dims[0], dims[1], dims[2]
+
+
 # ============================================================
 # LIVE DOCKING (real Vina run)
 # ============================================================
@@ -239,9 +306,14 @@ def dock(smiles, pdb_id, work_dir="dock_tmp", exhaustiveness=4):
     if not ok:
         return False, f"Ligand prep failed: {msg}"
 
-    # 3. Grid box (blind docking over whole protein)
-    cx, cy, cz, sx, sy, sz = compute_protein_centroid(receptor_pdbqt)
-    sx, sy, sz = min(sx, 30), min(sy, 30), min(sz, 30)
+    # 3. Grid box — prefer the real active site (co-crystallized ligand),
+    #    fall back to whole-protein blind docking only if no ligand is found.
+    box = find_active_site_box(pdb_path)
+    if box is not None:
+        cx, cy, cz, sx, sy, sz = box
+    else:
+        cx, cy, cz, sx, sy, sz = compute_protein_centroid(receptor_pdbqt)
+        sx, sy, sz = min(sx, 30), min(sy, 30), min(sz, 30)
 
     # 4. Run Vina
     cmd = [
@@ -255,16 +327,46 @@ def dock(smiles, pdb_id, work_dir="dock_tmp", exhaustiveness=4):
     ]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
-        if result.returncode != 0:
-            return False, f"Vina error: {result.stdout[-300:]}"
-        affinity = _parse_best_affinity(result.stdout)
+
+        # Try parsing the output PDBQT file FIRST (most reliable across Vina versions).
+        # Vina writes "REMARK VINA RESULT:  <affinity>  <rmsd_lb>  <rmsd_ub>" for each pose.
+        affinity = _parse_affinity_from_pdbqt(out_poses)
+
+        # Fall back to stdout parsing if the file didn't have it
         if affinity is None:
-            return False, "Could not parse Vina output"
+            affinity = _parse_best_affinity(result.stdout)
+
+        if affinity is None:
+            # Return diagnostic info so we can see what Vina actually said
+            diag = result.stdout[-400:] if result.stdout else "(no stdout)"
+            err = result.stderr[-400:] if result.stderr else "(no stderr)"
+            return False, f"Could not parse Vina output. rc={result.returncode}. stdout: {diag} | stderr: {err}"
+
         return True, affinity
     except subprocess.TimeoutExpired:
         return False, "Docking timed out"
     except Exception as e:
         return False, str(e)
+
+
+def _parse_affinity_from_pdbqt(pdbqt_path):
+    """
+    Read the best affinity from a Vina output PDBQT file.
+    Vina writes lines like:  REMARK VINA RESULT:    -9.4      0.000      0.000
+    The first one is the best pose.
+    """
+    if not os.path.exists(pdbqt_path):
+        return None
+    try:
+        with open(pdbqt_path) as f:
+            for line in f:
+                if line.startswith("REMARK VINA RESULT:"):
+                    parts = line.split()
+                    # parts = ['REMARK','VINA','RESULT:', '-9.4', '0.000', '0.000']
+                    return round(float(parts[3]), 2)
+    except (ValueError, IndexError, IOError):
+        return None
+    return None
 
 
 def _parse_best_affinity(stdout_text):
