@@ -15,27 +15,20 @@ except ImportError:
     DOCKING_AVAILABLE = False
 
 
-def resolve_score(case_id, candidate, protein_type="target", fallback_field="cox2_score"):
+def resolve_score(case_id, candidate, protein_type="target"):
     """
-    Get the docking score for a ligand.
+    Get the REAL docking score for a ligand.
 
-    Tries real pre-computed Vina scores first. If none exist,
-    falls back to the value stored in cases.py.
+    Returns the pre-computed Vina score, or None if no real score exists.
+    There are no fake/estimated fallbacks — if a score isn't real, we don't show it.
 
-    Returns: (score: float, source: str) — source is "real" or "estimated"
+    Returns: float (real Vina score) or None
     """
     if DOCKING_AVAILABLE:
         real_score = get_real_score(case_id, candidate["name"], protein_type)
         if real_score is not None:
-            return real_score, "real"
-
-    # Fall back to hardcoded value
-    if protein_type == "target":
-        return candidate.get(fallback_field, 0.0), "estimated"
-    else:
-        # For off-target, we don't have a fallback in candidate dict —
-        # the caller should look it up in case["selectivity_data"]
-        return None, "estimated"
+            return real_score
+    return None
 
 
 # ==================== SESSION STATE ====================
@@ -244,59 +237,98 @@ def show_stage_3(case):
         st.session_state.stage3_picks = picked
         st.write(f"Selected: **{len(picked)} / 3**")
 
-        # Docking mode selector
+        # Docking mode selector — real scores are REQUIRED
         live_mode = False
         if real_available:
-            st.caption("🟢 Real pre-computed AutoDock Vina scores available for this case.")
-        else:
+            st.caption("🟢 Real pre-computed AutoDock Vina scores are available for this case.")
+        elif DOCKING_AVAILABLE:
+            st.warning(
+                "⚠️ No pre-computed scores for this case yet. "
+                "Enable live docking below to compute **real** Vina scores now, "
+                "or run `python precompute_docking.py` to generate them in advance."
+            )
             live_mode = st.checkbox(
                 "⚡ Run REAL docking now (AutoDock Vina — slower, ~1-3 min for 3 ligands)",
-                help="Runs actual Vina docking live. If unchecked, uses estimated scores from the case database."
+                help="Runs actual Vina docking live. Downloads the Vina binary and PDB on first run."
+            )
+        else:
+            st.error(
+                "❌ The docking engine isn't available in this environment, and no "
+                "pre-computed scores exist. This stage needs real docking data. "
+                "Run `python precompute_docking.py` on a machine with RDKit installed."
             )
 
         if len(picked) == 3:
-            if st.button("🔬 Run docking", type="primary"):
-                chosen = [case["candidates"][i] for i in picked]
+            # Only allow docking if we can produce REAL scores
+            can_dock = real_available or (live_mode and DOCKING_AVAILABLE)
 
-                # Resolve scores for each candidate
-                if live_mode and DOCKING_AVAILABLE:
+            run_clicked = st.button(
+                "🔬 Run docking",
+                type="primary",
+                disabled=not can_dock
+            )
+
+            if not can_dock and not real_available:
+                st.caption("Enable live docking above to proceed with real scores.")
+
+            if run_clicked and can_dock:
+                chosen = [case["candidates"][i] for i in picked]
+                docking_failed = False
+
+                if live_mode and not real_available:
                     # LIVE Vina docking
                     from docking import dock
                     progress = st.progress(0, text="Starting AutoDock Vina...")
                     for idx, cand in enumerate(chosen):
                         progress.progress(
-                            int((idx) / len(chosen) * 100),
-                            text=f"Docking {cand['name']}... (this is real Vina, please wait)"
+                            int(idx / len(chosen) * 100),
+                            text=f"Docking {cand['name']}... (real Vina, please wait)"
                         )
                         ok, result = dock(cand["smiles"], case["target_pdb"], exhaustiveness=4)
-                        cand["_score"] = result if ok else cand.get("cox2_score", 0.0)
-                        cand["_source"] = "real (live)" if ok else "estimated (dock failed)"
+                        if ok:
+                            cand["_score"] = result
+                            # Cache the real result for future runs
+                            from docking import save_score
+                            save_score(case["id"], cand["name"], "target", result)
+                        else:
+                            cand["_score"] = None
+                            docking_failed = True
+                            st.error(f"Docking failed for {cand['name']}: {result}")
                     progress.progress(100, text="Docking complete!")
                 else:
-                    # LOOKUP or estimated
+                    # LOOKUP real pre-computed scores
                     for cand in chosen:
-                        score, source = resolve_score(case["id"], cand, "target")
+                        score = resolve_score(case["id"], cand, "target")
                         cand["_score"] = score
-                        cand["_source"] = "real" if source == "real" else "estimated"
+                        if score is None:
+                            docking_failed = True
 
-                # Sort by score (lower = stronger binding)
-                results = sorted(chosen, key=lambda x: x["_score"])
-                top = results[0]
-                st.session_state.stage3_results = results
-                st.session_state.stage3_top_pick = top
-                st.session_state.stage3_done = True
+                # If any score is missing, do NOT proceed with fake data
+                if docking_failed or any(c.get("_score") is None for c in chosen):
+                    st.error(
+                        "❌ Could not get real docking scores for all selected ligands. "
+                        "Not showing any results rather than showing fake numbers. "
+                        "Try live docking, or pre-compute scores first."
+                    )
+                else:
+                    # All real — proceed
+                    results = sorted(chosen, key=lambda x: x["_score"])
+                    top = results[0]
+                    st.session_state.stage3_results = results
+                    st.session_state.stage3_top_pick = top
+                    st.session_state.stage3_done = True
 
-                # Score based on the ligand "kind" (pedagogical, not the raw dock score)
-                if top["kind"] == "best":
-                    add_score(25)
-                    add_badge("💊 Drug Hunter")
-                elif top["kind"] == "alt":
-                    add_score(15)
-                elif top["kind"] == "weak":
-                    add_score(-15)
-                else:  # decoy
-                    add_score(-20)
-                st.rerun()
+                    # Game points based on pedagogical "kind" (not raw score)
+                    if top["kind"] == "best":
+                        add_score(25)
+                        add_badge("💊 Drug Hunter")
+                    elif top["kind"] == "alt":
+                        add_score(15)
+                    elif top["kind"] == "weak":
+                        add_score(-15)
+                    else:
+                        add_score(-20)
+                    st.rerun()
         elif len(picked) > 3:
             st.warning("Please select only 3.")
     else:
@@ -304,16 +336,12 @@ def show_stage_3(case):
         results = st.session_state.stage3_results
         top = st.session_state.stage3_top_pick
 
-        # Indicate score source
-        source = results[0].get("_source", "estimated")
-        if "real" in source:
-            st.caption(f"🟢 Showing **real AutoDock Vina** docking scores ({source}).")
-        else:
-            st.caption("🟡 Showing **estimated** scores. Run precompute_docking.py for real Vina values.")
+        # All scores here are guaranteed real
+        st.caption("🟢 Showing **real AutoDock Vina** docking scores.")
 
-        # Bar chart
+        # Bar chart (all scores are real Vina values)
         names = [r["name"] for r in results]
-        scores = [r.get("_score", r.get("cox2_score", 0.0)) for r in results]
+        scores = [r["_score"] for r in results]
         colors = ["#2e7d32" if r["kind"] in ("best", "alt") else
                   "#888888" if r["kind"] == "decoy" else "#f57c00" for r in results]
 
@@ -392,27 +420,44 @@ def show_stage_4(case):
     A good drug binds tightly to the target but weakly to the off-target.
     """)
 
-    # Use real docking scores if available, else fall back to case data
-    target_score = sel["target_score"]
-    off_score = sel["off_score"]
-    score_source = "estimated"
+    # Require REAL scores for both target and off-target
+    target_score = resolve_score(case["id"], top, "target")
+    off_score = resolve_score(case["id"], top, "off_target")
 
-    if DOCKING_AVAILABLE:
-        real_target = get_real_score(case["id"], top["name"], "target")
-        real_off = get_real_score(case["id"], top["name"], "off_target")
-        if real_target is not None and real_off is not None:
-            target_score = real_target
-            off_score = real_off
-            score_source = "real"
-            # Recompute pass/fail from real scores: selective if target is
-            # meaningfully stronger (more negative) than off-target
-            sel = dict(sel)  # copy so we don't mutate case data
-            sel["pass"] = (target_score < off_score - 0.5)
+    # If off-target score is missing, offer to dock it live
+    if off_score is None and DOCKING_AVAILABLE:
+        st.warning(
+            f"⚠️ No real off-target docking score for {top['name']} yet. "
+            f"Dock it against {case['off_target']} now to continue."
+        )
+        if st.button(f"⚡ Dock {top['name']} vs {case['off_target']} (real Vina)", type="primary"):
+            from docking import dock, save_score
+            with st.spinner(f"Running real Vina docking against {case['off_target']}..."):
+                ok, result = dock(top["smiles"], case["off_target_pdb"], exhaustiveness=4)
+            if ok:
+                save_score(case["id"], top["name"], "off_target", result)
+                off_score = result
+                st.rerun()
+            else:
+                st.error(f"Docking failed: {result}")
+        return
 
-    if score_source == "real":
-        st.caption("🟢 Showing **real AutoDock Vina** docking scores.")
-    else:
-        st.caption("🟡 Showing **estimated** scores from the case database.")
+    # If we still don't have both real scores, refuse to show fake data
+    if target_score is None or off_score is None:
+        st.error(
+            "❌ Real docking scores aren't available for this selectivity test, and "
+            "the docking engine isn't usable in this environment. "
+            "Run `python precompute_docking.py` to generate real scores. "
+            "This stage will not show estimated numbers."
+        )
+        return
+
+    # Compute selectivity from REAL scores (selective if target binds
+    # meaningfully stronger than off-target)
+    is_selective = (target_score < off_score - 0.5)
+    sel_msg = sel.get("msg", "")  # keep the educational explanation
+
+    st.caption("🟢 Showing **real AutoDock Vina** docking scores.")
 
     col1, col2 = st.columns(2)
     with col1:
@@ -422,22 +467,22 @@ def show_stage_4(case):
             "Strong bind ✓"
         )
     with col2:
-        delta_label = "Weak bind ✓" if sel["pass"] else "Too strong ✗"
+        delta_label = "Weak bind ✓" if is_selective else "Too strong ✗"
         st.metric(
             f"Off-target ({case['off_target']})",
             f"{off_score} kcal/mol",
             delta_label,
-            delta_color="normal" if sel["pass"] else "inverse"
+            delta_color="normal" if is_selective else "inverse"
         )
 
     selectivity_ratio = round(off_score / target_score, 2) if target_score else 0
     st.metric("Selectivity ratio (off/target)", selectivity_ratio)
 
     if not st.session_state.stage4_done:
-        if sel["pass"]:
+        if is_selective:
             st.markdown(f"""
             <div class="success-box">
-                <strong>✅ Selectivity confirmed (+30 points)</strong><br>{sel['msg']}
+                <strong>✅ Selectivity confirmed (+30 points)</strong><br>{sel_msg}
             </div>
             """, unsafe_allow_html=True)
             add_score(30)
@@ -445,7 +490,9 @@ def show_stage_4(case):
         else:
             st.markdown(f"""
             <div class="danger-box">
-                <strong>❌ Poor selectivity</strong><br>{sel['msg']}
+                <strong>❌ Poor selectivity</strong><br>
+                The real docking shows this ligand binds the off-target almost as
+                strongly as the target. {sel_msg}
             </div>
             """, unsafe_allow_html=True)
         st.session_state.stage4_done = True
