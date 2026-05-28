@@ -1,6 +1,6 @@
-# 🧬 Drug Hunter — Educational Game
+# 🧬 CSI: Drug Discovery — Educational Game
 
-An interactive educational game for UG/PG students learning **molecular docking** and **drug discovery**. Built by Sarang Dhote.
+An interactive educational game for UG/PG students learning **molecular docking** and **drug discovery**. Built with Streamlit.
 
 ## 🎮 How it works
 
@@ -108,13 +108,20 @@ Open `cases.py` and append a new dictionary to the `CASES` list. Follow the stru
 - `admet` — Lipinski properties for top candidates
 - `ending` — story conclusion
 
-## 🔬 Connecting to a real docking engine
+## 🔬 Real docking only — no fake numbers
 
-Currently, docking scores are pre-computed in `cases.py` for speed. To use real-time docking:
+**This game shows ONLY real AutoDock Vina docking scores.** There are no estimated or placeholder values. If real scores aren't available for a case, the game tells you clearly and offers to compute them live, rather than displaying made-up numbers.
 
-1. In `utils.py` → `show_stage_3()`, replace static `cox2_score` values with calls to your AutoDock Vina backend.
-2. Add a job queue (Celery + Redis) to handle long docking times.
-3. Cache results in a database to avoid re-running the same dock.
+You have two ways to get real scores:
+
+1. **Pre-compute (recommended):** Run `python precompute_docking.py` once. This docks every ligand with real Vina and saves results to `docking_results.json`. Players then see real scores instantly.
+
+2. **Live docking:** If a case has no pre-computed scores, the game offers an "⚡ Run REAL docking now" option that runs Vina on the spot (~1-3 min for 3 ligands).
+
+See `DOCKING_SETUP.md` for full details.
+
+⚠️ **Note on score differences:** Vina scores depend on the grid box, structure preparation, exhaustiveness, and a random seed. Scores from this game's *blind docking* (whole-protein box) will differ from *active-site* docking done in other tools. This is expected — see DOCKING_SETUP.md for how to switch to active-site docking.
+
 
 ## 📜 License
 
