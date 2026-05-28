@@ -7,6 +7,36 @@ import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 
+# Try to import real docking module; fall back to hardcoded scores if missing
+try:
+    from docking import get_score as get_real_score
+    DOCKING_AVAILABLE = True
+except ImportError:
+    DOCKING_AVAILABLE = False
+
+
+def resolve_score(case_id, candidate, protein_type="target", fallback_field="cox2_score"):
+    """
+    Get the docking score for a ligand.
+
+    Tries real pre-computed Vina scores first. If none exist,
+    falls back to the value stored in cases.py.
+
+    Returns: (score: float, source: str) — source is "real" or "estimated"
+    """
+    if DOCKING_AVAILABLE:
+        real_score = get_real_score(case_id, candidate["name"], protein_type)
+        if real_score is not None:
+            return real_score, "real"
+
+    # Fall back to hardcoded value
+    if protein_type == "target":
+        return candidate.get(fallback_field, 0.0), "estimated"
+    else:
+        # For off-target, we don't have a fallback in candidate dict —
+        # the caller should look it up in case["selectivity_data"]
+        return None, "estimated"
+
 
 # ==================== SESSION STATE ====================
 
@@ -190,6 +220,15 @@ def show_stage_3(case):
 
     st.markdown("Select **exactly 3** candidates to dock against the target. Choose wisely — decoys waste your run.")
 
+    # Detect whether real pre-computed scores exist for this case
+    real_available = False
+    if DOCKING_AVAILABLE:
+        try:
+            from docking import has_results_for_case
+            real_available = has_results_for_case(case["id"])
+        except Exception:
+            real_available = False
+
     if not st.session_state.stage3_done:
         # Build candidate selection
         picked = []
@@ -205,19 +244,49 @@ def show_stage_3(case):
         st.session_state.stage3_picks = picked
         st.write(f"Selected: **{len(picked)} / 3**")
 
+        # Docking mode selector
+        live_mode = False
+        if real_available:
+            st.caption("🟢 Real pre-computed AutoDock Vina scores available for this case.")
+        else:
+            live_mode = st.checkbox(
+                "⚡ Run REAL docking now (AutoDock Vina — slower, ~1-3 min for 3 ligands)",
+                help="Runs actual Vina docking live. If unchecked, uses estimated scores from the case database."
+            )
+
         if len(picked) == 3:
             if st.button("🔬 Run docking", type="primary"):
-                # Sort picks by score (lower = better binding)
-                results = sorted(
-                    [case["candidates"][i] for i in picked],
-                    key=lambda x: x["cox2_score"]
-                )
+                chosen = [case["candidates"][i] for i in picked]
+
+                # Resolve scores for each candidate
+                if live_mode and DOCKING_AVAILABLE:
+                    # LIVE Vina docking
+                    from docking import dock
+                    progress = st.progress(0, text="Starting AutoDock Vina...")
+                    for idx, cand in enumerate(chosen):
+                        progress.progress(
+                            int((idx) / len(chosen) * 100),
+                            text=f"Docking {cand['name']}... (this is real Vina, please wait)"
+                        )
+                        ok, result = dock(cand["smiles"], case["target_pdb"], exhaustiveness=4)
+                        cand["_score"] = result if ok else cand.get("cox2_score", 0.0)
+                        cand["_source"] = "real (live)" if ok else "estimated (dock failed)"
+                    progress.progress(100, text="Docking complete!")
+                else:
+                    # LOOKUP or estimated
+                    for cand in chosen:
+                        score, source = resolve_score(case["id"], cand, "target")
+                        cand["_score"] = score
+                        cand["_source"] = "real" if source == "real" else "estimated"
+
+                # Sort by score (lower = stronger binding)
+                results = sorted(chosen, key=lambda x: x["_score"])
                 top = results[0]
                 st.session_state.stage3_results = results
                 st.session_state.stage3_top_pick = top
                 st.session_state.stage3_done = True
 
-                # Score based on what they picked
+                # Score based on the ligand "kind" (pedagogical, not the raw dock score)
                 if top["kind"] == "best":
                     add_score(25)
                     add_badge("💊 Drug Hunter")
@@ -235,9 +304,16 @@ def show_stage_3(case):
         results = st.session_state.stage3_results
         top = st.session_state.stage3_top_pick
 
+        # Indicate score source
+        source = results[0].get("_source", "estimated")
+        if "real" in source:
+            st.caption(f"🟢 Showing **real AutoDock Vina** docking scores ({source}).")
+        else:
+            st.caption("🟡 Showing **estimated** scores. Run precompute_docking.py for real Vina values.")
+
         # Bar chart
         names = [r["name"] for r in results]
-        scores = [r["cox2_score"] for r in results]
+        scores = [r.get("_score", r.get("cox2_score", 0.0)) for r in results]
         colors = ["#2e7d32" if r["kind"] in ("best", "alt") else
                   "#888888" if r["kind"] == "decoy" else "#f57c00" for r in results]
 
@@ -316,23 +392,45 @@ def show_stage_4(case):
     A good drug binds tightly to the target but weakly to the off-target.
     """)
 
+    # Use real docking scores if available, else fall back to case data
+    target_score = sel["target_score"]
+    off_score = sel["off_score"]
+    score_source = "estimated"
+
+    if DOCKING_AVAILABLE:
+        real_target = get_real_score(case["id"], top["name"], "target")
+        real_off = get_real_score(case["id"], top["name"], "off_target")
+        if real_target is not None and real_off is not None:
+            target_score = real_target
+            off_score = real_off
+            score_source = "real"
+            # Recompute pass/fail from real scores: selective if target is
+            # meaningfully stronger (more negative) than off-target
+            sel = dict(sel)  # copy so we don't mutate case data
+            sel["pass"] = (target_score < off_score - 0.5)
+
+    if score_source == "real":
+        st.caption("🟢 Showing **real AutoDock Vina** docking scores.")
+    else:
+        st.caption("🟡 Showing **estimated** scores from the case database.")
+
     col1, col2 = st.columns(2)
     with col1:
         st.metric(
             f"Target ({case['target_protein']})",
-            f"{sel['target_score']} kcal/mol",
+            f"{target_score} kcal/mol",
             "Strong bind ✓"
         )
     with col2:
         delta_label = "Weak bind ✓" if sel["pass"] else "Too strong ✗"
         st.metric(
             f"Off-target ({case['off_target']})",
-            f"{sel['off_score']} kcal/mol",
+            f"{off_score} kcal/mol",
             delta_label,
             delta_color="normal" if sel["pass"] else "inverse"
         )
 
-    selectivity_ratio = round(sel['off_score'] / sel['target_score'], 2)
+    selectivity_ratio = round(off_score / target_score, 2) if target_score else 0
     st.metric("Selectivity ratio (off/target)", selectivity_ratio)
 
     if not st.session_state.stage4_done:
@@ -425,10 +523,10 @@ def show_final_result(case):
         title, badge = "Back to the textbooks", "📚"
 
     st.markdown(f"""
-    <div style="background:#f5f5f7; padding:2rem; border-radius:12px; text-align:center;">
-        <div style="font-size:3rem;">{badge}</div>
-        <div style="font-size:1.5rem; font-weight:500;">{title}</div>
-        <div style="font-size:2rem; font-weight:bold; margin-top:1rem;">{score} / 100</div>
+    <div style="background:#eef2ff; color:#1a1a2e; padding:2rem; border-radius:12px; text-align:center; border: 2px solid #5b6cff;">
+        <div style="font-size:3rem; color:#1a1a2e;">{badge}</div>
+        <div style="font-size:1.5rem; font-weight:500; color:#1a1a2e;">{title}</div>
+        <div style="font-size:2rem; font-weight:bold; margin-top:1rem; color:#1a1a2e;">{score} / 100</div>
     </div>
     """, unsafe_allow_html=True)
 
