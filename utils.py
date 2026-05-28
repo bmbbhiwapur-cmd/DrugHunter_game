@@ -1,384 +1,319 @@
 """
-Utility functions for Drug Hunter game.
-Handles session state, rendering, and scoring logic.
+Drug Hunter — Game logic & UI
+Developed by Sarang Dhote, Shivaji Science College, Nagpur
 """
 
 import streamlit as st
 import pandas as pd
 import plotly.graph_objects as go
 
-# Try to import real docking module; fall back to hardcoded scores if missing
-try:
-    from docking import get_score as get_real_score
-    DOCKING_AVAILABLE = True
-except ImportError:
-    DOCKING_AVAILABLE = False
+# Docking is OPTIONAL — imported lazily inside functions only
+# This file NEVER crashes on import even if vina/rdkit are absent
+
+STAGE_LABELS = [
+    "Identify\nTarget",
+    "Find\nPocket",
+    "Dock\nLigands",
+    "Selectivity",
+    "ADMET",
+]
 
 
-def resolve_score(case_id, candidate, protein_type="target"):
-    """
-    Get the REAL docking score for a ligand.
-
-    Returns the pre-computed Vina score, or None if no real score exists.
-    There are no fake/estimated fallbacks — if a score isn't real, we don't show it.
-
-    Returns: float (real Vina score) or None
-    """
-    if DOCKING_AVAILABLE:
-        real_score = get_real_score(case_id, candidate["name"], protein_type)
-        if real_score is not None:
-            return real_score
-    return None
-
-
-# ==================== SESSION STATE ====================
+# ── Session state ─────────────────────────────────────────────────────────────
 
 def init_session_state():
-    """Initialize all required session state variables."""
     defaults = {
-        "case_index": 0,
-        "current_stage": 1,
-        "score": 0,
+        "case_index":      0,
+        "current_stage":   1,
+        "score":           0,
         "stage1_answered": False,
         "stage2_answered": False,
-        "stage3_picks": [],
+        "stage3_picks":    [],
         "stage3_top_pick": None,
-        "stage3_done": False,
-        "stage4_done": False,
-        "stage5_done": False,
-        "badges": [],
+        "stage3_done":     False,
+        "stage4_done":     False,
+        "stage5_done":     False,
+        "badges":          [],
+        "score_submitted": False,
     }
-    for key, value in defaults.items():
-        if key not in st.session_state:
-            st.session_state[key] = value
+    for k, v in defaults.items():
+        if k not in st.session_state:
+            st.session_state[k] = v
 
 
 def reset_game():
-    """Reset all game state for a new case."""
-    st.session_state.current_stage = 1
-    st.session_state.score = 0
-    st.session_state.stage1_answered = False
-    st.session_state.stage2_answered = False
-    st.session_state.stage3_picks = []
-    st.session_state.stage3_top_pick = None
-    st.session_state.stage3_done = False
-    st.session_state.stage4_done = False
-    st.session_state.stage5_done = False
-    st.session_state.badges = []
-    st.session_state.score_submitted = False
+    for k in ["current_stage","score","stage1_answered","stage2_answered",
+              "stage3_picks","stage3_top_pick","stage3_done",
+              "stage4_done","stage5_done","badges","score_submitted"]:
+        st.session_state.pop(k, None)
+    init_session_state()
 
 
-def add_score(points):
-    st.session_state.score = max(0, st.session_state.score + points)
+def add_score(pts):
+    st.session_state.score = max(0, st.session_state.score + pts)
 
 
-def add_badge(badge):
-    if badge not in st.session_state.badges:
-        st.session_state.badges.append(badge)
+def add_badge(b):
+    if b not in st.session_state.badges:
+        st.session_state.badges.append(b)
 
 
-# ==================== UI HELPERS ====================
-
-STAGE_LABELS = ["Identify\nTarget", "Find\nPocket", "Dock\nLigands", "Selectivity", "ADMET"]
+# ── Top bar (always visible — shows on mobile) ────────────────────────────────
 
 def show_top_bar(case, page):
-    """
-    Always-visible branded header — shows Drug Hunter name, score,
-    and current case on every screen size including mobile.
-    """
     score = st.session_state.score
     stage = st.session_state.current_stage
     if page == "🎮 Play":
-        right_info = (
-            f'<span class="dh-score-pill">'
-            f'Score: <b>{score}</b> &nbsp;|&nbsp; Stage <b>{min(stage,5)}/5</b>'
-            f'</span>'
-        )
+        right = (f'<span class="dh-score-pill">'
+                 f'Score: <b>{score}</b> &nbsp;|&nbsp; '
+                 f'Stage <b>{min(stage,5)}/5</b></span>')
     else:
-        right_info = '<span class="dh-score-pill">Drug Hunter</span>'
+        right = '<span class="dh-score-pill">Drug Hunter</span>'
 
     st.markdown(f"""
     <div class="dh-topbar">
         <div>
             <p class="dh-title">🧬 Drug Hunter</p>
-            <p class="dh-subtitle">By Sarang Dhote &nbsp;·&nbsp; Shivaji Science College, Nagpur</p>
+            <p class="dh-subtitle">
+                By Sarang Dhote &nbsp;·&nbsp; Shivaji Science College, Nagpur
+            </p>
         </div>
-        {right_info}
+        {right}
     </div>
     """, unsafe_allow_html=True)
 
 
+# ── Progress stepper (pure HTML — works on all screen sizes) ──────────────────
+
 def show_progress_stepper():
-    """
-    Mobile-friendly horizontal step tracker.
-    Uses pure HTML/CSS — no st.columns, works on any screen width.
-    """
-    current = st.session_state.current_stage   # 1-5 (6 = final)
-    n = 5
-    steps_html = ""
-    for i in range(n):
-        step_num = i + 1
-        if step_num < current:
-            circle_cls = "done"
-            label_cls  = "done-lbl"
-            icon = "✓"
-        elif step_num == current:
-            circle_cls = "active"
-            label_cls  = "active-lbl"
-            icon = str(step_num)
+    current = st.session_state.current_stage
+    parts   = []
+    for i, label in enumerate(STAGE_LABELS):
+        step = i + 1
+        if step < current:
+            cc, lc, icon = "done",   "done-lbl",   "✓"
+        elif step == current:
+            cc, lc, icon = "active", "active-lbl", str(step)
         else:
-            circle_cls = "todo"
-            label_cls  = ""
-            icon = str(step_num)
+            cc, lc, icon = "todo",   "",           str(step)
 
-        label = STAGE_LABELS[i].replace("\n", "<br>")
-
-        # Connector line between steps
         if i > 0:
-            if step_num <= current:
-                conn_cls = "done"
-            else:
-                conn_cls = "todo"
-            steps_html += f'<div class="dh-connector {conn_cls}"></div>'
+            conn = "done" if step <= current else "todo"
+            parts.append(f'<div class="dh-connector {conn}"></div>')
 
-        steps_html += f"""
+        lbl_html = label.replace("\n", "<br>")
+        parts.append(f"""
         <div class="dh-step">
-            <div class="dh-step-circle {circle_cls}">{icon}</div>
-            <div class="dh-step-label {label_cls}">{label}</div>
-        </div>"""
+            <div class="dh-step-circle {cc}">{icon}</div>
+            <div class="dh-step-label {lc}">{lbl_html}</div>
+        </div>""")
 
-    st.markdown(f'<div class="dh-stepper">{steps_html}</div>', unsafe_allow_html=True)
+    st.markdown(f'<div class="dh-stepper">{"".join(parts)}</div>',
+                unsafe_allow_html=True)
 
 
+# kept for backward compat
 def show_header(case):
-    """Kept for backward compatibility — now just shows case title."""
     st.markdown(f"### Case #{case['id']}: {case['title']}")
 
-
 def show_progress_bar():
-    """Kept for backward compat — calls the new stepper."""
     show_progress_stepper()
 
 
-# ==================== STAGE 1: TARGET IDENTIFICATION ====================
+# ── Stage 1: Target identification ────────────────────────────────────────────
 
 def show_stage_1(case):
     st.subheader("Stage 1 — Identify the target")
 
-    # Patient briefing
     p = case["patient"]
     st.markdown(f"""
     <div class="case-card">
-        <strong>🏥 Patient Briefing</strong><br>
-        <strong>Name:</strong> {p['name']}<br>
-        <strong>Age / Gender:</strong> {p['age']} / {p['gender']}<br>
-        <strong>Condition:</strong> {p['condition']}<br>
-        <strong>History:</strong> {p['history']}
+        <b>🏥 Patient Briefing</b><br>
+        <b>Name:</b> {p['name']} &nbsp;|&nbsp;
+        <b>Age:</b> {p['age']} &nbsp;|&nbsp;
+        <b>Gender:</b> {p['gender']}<br>
+        <b>Condition:</b> {p['condition']}<br>
+        <b>History:</b> {p['history']}
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown(f"**Question:** {case['stage1_question']}")
+    st.markdown(f"**{case['stage1_question']}**")
 
     if not st.session_state.stage1_answered:
         for i, opt in enumerate(case["stage1_options"]):
-            if st.button(f"{chr(65+i)}) {opt['text']}", key=f"s1_opt_{i}", use_container_width=True):
+            if st.button(f"{chr(65+i)}) {opt['text']}",
+                         key=f"s1_{i}", use_container_width=True):
+                st.session_state.stage1_correct  = opt["correct"]
+                st.session_state.stage1_feedback = opt["feedback"]
+                st.session_state.stage1_answered = True
                 if opt["correct"]:
-                    st.session_state.stage1_correct = True
                     add_score(20)
                     add_badge("🧠 Target Tracker")
                 else:
-                    st.session_state.stage1_correct = False
                     add_score(-10)
-                st.session_state.stage1_feedback = opt["feedback"]
-                st.session_state.stage1_answered = True
                 st.rerun()
     else:
         if st.session_state.stage1_correct:
-            st.markdown(f"""
-            <div class="success-box">
-                <strong>✅ Correct! +20 points</strong><br>{st.session_state.stage1_feedback}
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f"""<div class="success-box">
+                <b>✅ Correct! +20 points</b><br>
+                {st.session_state.stage1_feedback}
+            </div>""", unsafe_allow_html=True)
             if st.button("Continue to stage 2 →", type="primary"):
                 st.session_state.current_stage = 2
                 st.rerun()
         else:
-            st.markdown(f"""
-            <div class="danger-box">
-                <strong>❌ Not quite. −10 points</strong><br>{st.session_state.stage1_feedback}
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f"""<div class="danger-box">
+                <b>❌ Not quite. −10 points</b><br>
+                {st.session_state.stage1_feedback}
+            </div>""", unsafe_allow_html=True)
             if st.button("Try again"):
                 st.session_state.stage1_answered = False
                 st.rerun()
 
 
-# ==================== STAGE 2: POCKET IDENTIFICATION ====================
+# ── Stage 2: Pocket identification ───────────────────────────────────────────
 
 def show_stage_2(case):
     st.subheader("Stage 2 — Find the binding pocket")
 
-    st.markdown(f"""
-    The target protein is **{case['target_protein']}** (PDB: `{case['target_pdb']}`).
-    Where on this protein should the drug bind?
-    """)
+    pdb = case["target_pdb"]
+    st.markdown(f"Target: **{case['target_protein']}** (PDB: `{pdb}`)")
 
-    # Show 3D viewer via py3Dmol if available, else show info
+    # 3D viewer
     try:
         import py3Dmol
-        view = py3Dmol.view(query=f"pdb:{case['target_pdb']}", width=600, height=400)
-        view.setStyle({'cartoon': {'color': 'spectrum'}})
+        view = py3Dmol.view(query=f"pdb:{pdb}", width=600, height=380)
+        view.setStyle({"cartoon": {"color": "spectrum"}})
         view.zoomTo()
-        st.components.v1.html(view._make_html(), height=420)
-    except Exception as e:
-        st.info(f"💡 3D viewer unavailable. PDB ID: {case['target_pdb']} — students can view at https://www.rcsb.org/structure/{case['target_pdb']}")
+        st.components.v1.html(view._make_html(), height=400)
+    except Exception:
+        st.info(f"💡 View the 3D structure at "
+                f"[rcsb.org/structure/{pdb}](https://www.rcsb.org/structure/{pdb})")
 
     if not st.session_state.stage2_answered:
         st.markdown("**Which region is the drug binding pocket?**")
-        for i, region in enumerate(case["pocket_regions"]):
-            if st.button(region["name"], key=f"s2_opt_{i}", use_container_width=True):
-                if region["correct"]:
-                    st.session_state.stage2_correct = True
+        for i, r in enumerate(case["pocket_regions"]):
+            if st.button(r["name"], key=f"s2_{i}", use_container_width=True):
+                st.session_state.stage2_correct  = r["correct"]
+                st.session_state.stage2_feedback = r["feedback"]
+                st.session_state.stage2_answered = True
+                if r["correct"]:
                     add_score(20)
                     add_badge("🎯 Pocket Finder")
                 else:
-                    st.session_state.stage2_correct = False
                     add_score(-10)
-                st.session_state.stage2_feedback = region["feedback"]
-                st.session_state.stage2_answered = True
                 st.rerun()
     else:
         if st.session_state.stage2_correct:
-            st.markdown(f"""
-            <div class="success-box">
-                <strong>✅ Bullseye! +20 points</strong><br>{st.session_state.stage2_feedback}
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f"""<div class="success-box">
+                <b>✅ Bullseye! +20 points</b><br>
+                {st.session_state.stage2_feedback}
+            </div>""", unsafe_allow_html=True)
             if st.button("Continue to stage 3 →", type="primary"):
                 st.session_state.current_stage = 3
                 st.rerun()
         else:
-            st.markdown(f"""
-            <div class="danger-box">
-                <strong>❌ Wrong region. −10 points</strong><br>{st.session_state.stage2_feedback}
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f"""<div class="danger-box">
+                <b>❌ Wrong region. −10 points</b><br>
+                {st.session_state.stage2_feedback}
+            </div>""", unsafe_allow_html=True)
             if st.button("Try again"):
                 st.session_state.stage2_answered = False
                 st.rerun()
 
 
-# ==================== STAGE 3: LIGAND SELECTION & DOCKING ====================
+# ── Stage 3: Docking ──────────────────────────────────────────────────────────
 
 def show_stage_3(case):
     st.subheader("Stage 3 — Choose & dock candidate ligands")
     st.markdown("Select **exactly 3** candidates to dock against the target.")
 
-    # Check for pre-computed scores
-    real_available = False
-    if DOCKING_AVAILABLE:
-        try:
-            from docking import has_results_for_case
-            real_available = has_results_for_case(case["id"])
-        except Exception:
-            real_available = False
+    # Lazy import of docking — never at module level
+    try:
+        from docking import has_results_for_case, get_score, dock, save_score, docking_available
+        precomputed = has_results_for_case(case["id"])
+        live_ok     = docking_available()
+    except Exception:
+        precomputed = False
+        live_ok     = False
 
     if not st.session_state.stage3_done:
         picked = []
         for i, cand in enumerate(case["candidates"]):
-            col1, col2 = st.columns([1, 6])
-            with col1:
-                checked = st.checkbox("", key=f"s3_check_{i}",
-                                      label_visibility="collapsed")
-            with col2:
-                st.markdown(f"**{cand['name']}** — _{cand['desc']}_  \n"
-                            f"`SMILES: {cand['smiles']}`")
-            if checked:
+            c1, c2 = st.columns([1, 6])
+            with c1:
+                chk = st.checkbox("", key=f"s3_{i}", label_visibility="collapsed")
+            with c2:
+                st.markdown(f"**{cand['name']}** — _{cand['desc']}_")
+                st.caption(f"SMILES: `{cand['smiles']}`")
+            if chk:
                 picked.append(i)
 
-        st.session_state.stage3_picks = picked
         st.write(f"Selected: **{len(picked)} / 3**")
-
-        # Status banner
-        if real_available:
-            st.info("🟢 Pre-computed real Vina scores available — results will be instant.")
-        elif DOCKING_AVAILABLE:
-            st.info("⚡ No pre-computed scores yet — clicking **Run docking** will run "
-                    "real AutoDock Vina live (~30–90 s per ligand). "
-                    "Scores are saved after the first run so future plays are instant.")
-        else:
-            st.error("❌ Neither the docking engine nor pre-computed scores are available. "
-                     "Install requirements and run `python precompute_docking.py` first.")
-
         if len(picked) > 3:
-            st.warning("Please select only 3 candidates.")
+            st.warning("Please select only 3.")
 
-        can_dock = real_available or DOCKING_AVAILABLE
-        run_clicked = st.button("🔬 Run docking", type="primary",
-                                disabled=(len(picked) != 3 or not can_dock))
+        # Status message
+        if precomputed:
+            st.info("🟢 Pre-computed real Vina scores available — results will be instant.")
+        elif live_ok:
+            st.info("⚡ No pre-computed scores yet — clicking **Run docking** will run "
+                    "real AutoDock Vina live (~30–90 s per ligand).")
+        else:
+            st.warning("⚠️ Docking engine not available. Run `precompute_docking.py` "
+                       "locally to generate real scores, then push `docking_results.json` "
+                       "to your repo.")
 
-        if run_clicked and len(picked) == 3 and can_dock:
+        can_dock = precomputed or live_ok
+        if st.button("🔬 Run docking", type="primary",
+                     disabled=(len(picked) != 3 or not can_dock)):
             chosen = [case["candidates"][i] for i in picked]
-            all_ok = True
+            failed = []
 
-            if real_available:
-                # --- LOOKUP mode: instant ---
-                for cand in chosen:
-                    cand["_score"] = resolve_score(case["id"], cand, "target")
-                    if cand["_score"] is None:
-                        all_ok = False
-                if not all_ok:
-                    # Some pre-computed scores missing — fall through to live
-                    real_available = False
+            if precomputed:
+                for c in chosen:
+                    s = get_score(case["id"], c["name"], "target")
+                    c["_score"] = s
+                    if s is None:
+                        failed.append(c["name"])
+                # if any missing fall through to live
+                if failed:
+                    precomputed = False
 
-            if not real_available:
-                # --- LIVE docking mode ---
-                from docking import dock, save_score as _save
+            if not precomputed and live_ok:
                 bar = st.progress(0, text="Initialising AutoDock Vina…")
-                failed_names = []
-                for idx, cand in enumerate(chosen):
-                    bar.progress(
-                        int(idx / len(chosen) * 90),
-                        text=f"⚗️ Docking {cand['name']} against "
-                             f"{case['target_protein']}… (real Vina)"
-                    )
-                    ok, result = dock(
-                        cand["smiles"], case["target_pdb"],
-                        exhaustiveness=4
-                    )
+                for idx, c in enumerate(chosen):
+                    bar.progress(int(idx / len(chosen) * 90),
+                                 text=f"⚗️ Docking {c['name']}…")
+                    ok, result = dock(c["smiles"], case["target_pdb"], exhaustiveness=4)
                     if ok:
-                        cand["_score"] = result
-                        _save(case["id"], cand["name"], "target", result)
+                        c["_score"] = result
+                        save_score(case["id"], c["name"], "target", result)
                     else:
-                        cand["_score"] = None
-                        all_ok = False
-                        failed_names.append(f"{cand['name']}: {result}")
-                bar.progress(100, text="Docking complete!")
+                        c["_score"] = None
+                        failed.append(f"{c['name']}: {result}")
+                bar.progress(100, text="Done!")
 
-                if not all_ok:
-                    st.error(
-                        "❌ Docking failed for: " + "; ".join(failed_names) + "\n\n"
-                        "Common causes:\n"
-                        "- PDB download failed (check internet connection)\n"
-                        "- SMILES could not be converted to 3D (check validity)\n\n"
-                        "Please choose different candidates or try again."
-                    )
-                    # Recover: use whatever scores succeeded; skip None
-                    chosen = [c for c in chosen if c.get("_score") is not None]
-                    if len(chosen) < 2:
-                        return   # not enough to compare
+            # Remove failed ligands, need at least 2 to compare
+            valid = [c for c in chosen if c.get("_score") is not None]
+            if len(valid) < 2:
+                if failed:
+                    st.error("❌ Docking failed:\n" + "\n".join(failed) +
+                             "\n\nCheck internet connection and try again.")
+                return
 
-            # Sort by score (lower = stronger binding)
-            results = sorted(chosen, key=lambda x: x["_score"])
+            if failed:
+                st.warning("Some ligands failed: " + "; ".join(failed) +
+                           ". Showing results for the others.")
+
+            results = sorted(valid, key=lambda x: x["_score"])
             top = results[0]
-            st.session_state.stage3_results = results
+            st.session_state.stage3_results  = results
             st.session_state.stage3_top_pick = top
-            st.session_state.stage3_done = True
+            st.session_state.stage3_done     = True
 
-            # Points based on pedagogical category
             if top["kind"] == "best":
-                add_score(25)
-                add_badge("💊 Drug Hunter")
+                add_score(25); add_badge("💊 Drug Hunter")
             elif top["kind"] == "alt":
                 add_score(15)
             elif top["kind"] == "weak":
@@ -388,173 +323,137 @@ def show_stage_3(case):
             st.rerun()
 
     else:
-        # ── Show results ──────────────────────────────────────────────────
         results = st.session_state.stage3_results
-        top = st.session_state.stage3_top_pick
+        top     = st.session_state.stage3_top_pick
 
         st.caption("🟢 Showing **real AutoDock Vina** docking scores.")
 
         names  = [r["name"] for r in results]
         scores = [r["_score"] for r in results]
-        colors = ["#1A7A6E" if r["kind"] in ("best", "alt") else
+        colors = ["#1A7A6E" if r["kind"] in ("best","alt") else
                   "#888888" if r["kind"] == "decoy" else "#E8A020"
                   for r in results]
-
-        import plotly.graph_objects as go
-        fig = go.Figure(data=[go.Bar(
-            x=names, y=scores,
-            marker_color=colors,
-            text=[f"{s:.1f}" for s in scores],
-            textposition="outside"
-        )])
-        fig.update_layout(
-            title="Docking scores (more negative = stronger binding)",
-            yaxis_title="Binding affinity (kcal/mol)",
-            height=340, showlegend=False,
-            plot_bgcolor="rgba(0,0,0,0)",
-            paper_bgcolor="rgba(0,0,0,0)",
-        )
+        fig = go.Figure(go.Bar(x=names, y=scores, marker_color=colors,
+                               text=[f"{s:.1f}" for s in scores],
+                               textposition="outside"))
+        fig.update_layout(title="Docking scores (more negative = stronger binding)",
+                          yaxis_title="Binding affinity (kcal/mol)",
+                          height=320, showlegend=False,
+                          plot_bgcolor="rgba(0,0,0,0)",
+                          paper_bgcolor="rgba(0,0,0,0)")
         st.plotly_chart(fig, use_container_width=True)
 
-        if top["kind"] == "best":
-            st.markdown(f"""
-            <div class="success-box">
-                <strong>✅ Top binder: {top['name']} (+25 points)</strong><br>
-                Strong binding to {case['target_protein']}.
-                Now check whether it is selective in stage 4.
+        can_next = top["name"] in case.get("selectivity_data", {})
+        if top["kind"] in ("best","alt") and can_next:
+            st.markdown(f"""<div class="success-box">
+                <b>✅ Top binder: {top['name']}</b><br>
+                Good binding to {case['target_protein']}. Now check selectivity.
             </div>""", unsafe_allow_html=True)
-            can_continue = top["name"] in case["selectivity_data"]
-        elif top["kind"] == "alt":
-            st.markdown(f"""
-            <div class="warning-box">
-                <strong>⚠️ Top binder: {top['name']} (+15 points)</strong><br>
-                Selective binder — a surprise may await in stage 5…
-            </div>""", unsafe_allow_html=True)
-            can_continue = top["name"] in case["selectivity_data"]
-        elif top["kind"] == "weak":
-            st.markdown(f"""
-            <div class="danger-box">
-                <strong>❌ Weak binder (−15 points)</strong><br>
-                These candidates bind poorly. Try again with stronger choices.
-            </div>""", unsafe_allow_html=True)
-            can_continue = False
-        else:
-            st.markdown(f"""
-            <div class="danger-box">
-                <strong>❌ Top pick is a decoy (−20 points)</strong><br>
-                Check the structures before selecting.
-            </div>""", unsafe_allow_html=True)
-            can_continue = False
-
-        if can_continue:
             if st.button("Continue to stage 4 →", type="primary"):
                 st.session_state.current_stage = 4
                 st.rerun()
         else:
+            msg = ("Weak binding — try stronger candidates." if top["kind"] == "weak"
+                   else "Top pick is a decoy — check structures.")
+            st.markdown(f'<div class="danger-box"><b>❌ {msg}</b></div>',
+                        unsafe_allow_html=True)
             if st.button("Try again"):
                 st.session_state.stage3_done = False
                 st.rerun()
 
 
-
-
-
-# ==================== STAGE 4: SELECTIVITY ====================
+# ── Stage 4: Selectivity ──────────────────────────────────────────────────────
 
 def show_stage_4(case):
     st.subheader("Stage 4 — Selectivity test ⚠️")
-
     top = st.session_state.stage3_top_pick
-    sel = case["selectivity_data"].get(top["name"])
+    sel = case.get("selectivity_data", {}).get(top["name"])
 
     if not sel:
-        st.error("No selectivity data for this candidate. Go back and pick a different lead.")
-        if st.button("← Back to stage 3"):
+        st.error("No selectivity data. Go back and choose a different lead.")
+        if st.button("← Back"):
             st.session_state.current_stage = 3
-            st.session_state.stage3_done = False
+            st.session_state.stage3_done   = False
             st.rerun()
         return
 
-    st.markdown(f"""
-    Now test **{top['name']}** against the off-target **{case['off_target']}** (PDB: `{case['off_target_pdb']}`).
-    A good drug binds tightly to the target but weakly to the off-target.
-    """)
+    st.markdown(f"Now test **{top['name']}** against the off-target "
+                f"**{case['off_target']}** (PDB: `{case['off_target_pdb']}`).")
 
-    # Require REAL scores for both target and off-target
-    target_score = resolve_score(case["id"], top, "target")
-    off_score = resolve_score(case["id"], top, "off_target")
+    # Try to get real scores, fall back to asking for live dock
+    try:
+        from docking import get_score, dock, save_score, docking_available
+        t_score = get_score(case["id"], top["name"], "target")
+        o_score = get_score(case["id"], top["name"], "off_target")
+    except Exception:
+        t_score = None
+        o_score = None
 
-    # If off-target score is missing, offer to dock it live
-    if off_score is None and DOCKING_AVAILABLE:
-        st.warning(
-            f"⚠️ No real off-target docking score for {top['name']} yet. "
-            f"Dock it against {case['off_target']} now to continue."
-        )
-        if st.button(f"⚡ Dock {top['name']} vs {case['off_target']} (real Vina)", type="primary"):
-            from docking import dock, save_score
-            with st.spinner(f"Running real Vina docking against {case['off_target']}..."):
-                ok, result = dock(top["smiles"], case["off_target_pdb"], exhaustiveness=4)
-            if ok:
-                save_score(case["id"], top["name"], "off_target", result)
-                off_score = result
+    # Off-target missing — offer live dock
+    if o_score is None:
+        try:
+            from docking import docking_available, dock, save_score
+            if docking_available():
+                st.info(f"Off-target score not pre-computed. Click to dock live.")
+                if st.button(f"⚡ Dock {top['name']} vs {case['off_target']}",
+                             type="primary"):
+                    with st.spinner("Running real Vina…"):
+                        ok, result = dock(top["smiles"],
+                                         case["off_target_pdb"],
+                                         exhaustiveness=4)
+                    if ok:
+                        save_score(case["id"], top["name"], "off_target", result)
+                        o_score = result
+                        st.rerun()
+                    else:
+                        st.error(f"Docking failed: {result}")
+                return
+        except Exception:
+            pass
+
+    if t_score is None or o_score is None:
+        st.warning("Pre-computed off-target score not available. Run "
+                   "`precompute_docking.py` to generate it, then push "
+                   "`docking_results.json` to your repo.")
+        # Allow manual continue using pedagogical pass/fail
+        if not st.session_state.stage4_done:
+            is_sel = sel.get("pass", False)
+            _render_selectivity(is_sel, sel["msg"], None, None, case, top)
+        else:
+            if st.button("Continue to stage 5 →", type="primary"):
+                st.session_state.current_stage = 5
                 st.rerun()
-            else:
-                st.error(f"Docking failed: {result}")
         return
 
-    # If we still don't have both real scores, refuse to show fake data
-    if target_score is None or off_score is None:
-        st.error(
-            "❌ Real docking scores aren't available for this selectivity test, and "
-            "the docking engine isn't usable in this environment. "
-            "Run `python precompute_docking.py` to generate real scores. "
-            "This stage will not show estimated numbers."
-        )
-        return
-
-    # Compute selectivity from REAL scores (selective if target binds
-    # meaningfully stronger than off-target)
-    is_selective = (target_score < off_score - 0.5)
-    sel_msg = sel.get("msg", "")  # keep the educational explanation
-
+    # Real scores available
+    is_sel = (t_score < o_score - 0.5)
     st.caption("🟢 Showing **real AutoDock Vina** docking scores.")
+    _render_selectivity(is_sel, sel["msg"], t_score, o_score, case, top)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        st.metric(
-            f"Target ({case['target_protein']})",
-            f"{target_score} kcal/mol",
-            "Strong bind ✓"
-        )
-    with col2:
-        delta_label = "Weak bind ✓" if is_selective else "Too strong ✗"
-        st.metric(
-            f"Off-target ({case['off_target']})",
-            f"{off_score} kcal/mol",
-            delta_label,
-            delta_color="normal" if is_selective else "inverse"
-        )
 
-    selectivity_ratio = round(off_score / target_score, 2) if target_score else 0
-    st.metric("Selectivity ratio (off/target)", selectivity_ratio)
+def _render_selectivity(is_sel, msg, t_score, o_score, case, top):
+    c1, c2 = st.columns(2)
+    if t_score is not None:
+        c1.metric(f"Target ({case['target_protein']})",
+                  f"{t_score} kcal/mol", "Strong ✓")
+        c2.metric(f"Off-target ({case['off_target']})",
+                  f"{o_score} kcal/mol",
+                  "Weak ✓" if is_sel else "Too strong ✗",
+                  delta_color="normal" if is_sel else "inverse")
+        ratio = round(o_score / t_score, 2) if t_score else 0
+        st.metric("Selectivity ratio (off/target)", ratio)
 
     if not st.session_state.stage4_done:
-        if is_selective:
-            st.markdown(f"""
-            <div class="success-box">
-                <strong>✅ Selectivity confirmed (+30 points)</strong><br>{sel_msg}
-            </div>
-            """, unsafe_allow_html=True)
+        if is_sel:
+            st.markdown(f"""<div class="success-box">
+                <b>✅ Selectivity confirmed! +30 points</b><br>{msg}
+            </div>""", unsafe_allow_html=True)
             add_score(30)
             add_badge("⚖️ Selectivity Sage")
         else:
-            st.markdown(f"""
-            <div class="danger-box">
-                <strong>❌ Poor selectivity</strong><br>
-                The real docking shows this ligand binds the off-target almost as
-                strongly as the target. {sel_msg}
-            </div>
-            """, unsafe_allow_html=True)
+            st.markdown(f"""<div class="danger-box">
+                <b>❌ Poor selectivity.</b><br>{msg}
+            </div>""", unsafe_allow_html=True)
         st.session_state.stage4_done = True
         st.rerun()
     else:
@@ -563,47 +462,45 @@ def show_stage_4(case):
             st.rerun()
 
 
-# ==================== STAGE 5: ADMET & FINAL ====================
+# ── Stage 5: ADMET ────────────────────────────────────────────────────────────
 
 def show_stage_5(case):
     st.subheader("Stage 5 — ADMET & drug-likeness")
-
-    top = st.session_state.stage3_top_pick
-    admet = case["admet"].get(top["name"])
+    top   = st.session_state.stage3_top_pick
+    admet = case.get("admet", {}).get(top["name"])
 
     if not admet:
-        st.error("No ADMET data for this candidate.")
+        st.warning("No ADMET data for this candidate.")
+        if st.button("Continue →", type="primary"):
+            st.session_state.current_stage = 6
+            st.rerun()
         return
 
-    st.markdown(f"Final check on **{top['name']}** — does it satisfy Lipinski's Rule of 5?")
+    st.markdown(f"Final check on **{top['name']}** — Lipinski's Rule of 5:")
 
-    # Build a table
     rules = [
-        ("Molecular weight", admet["MW"], "< 500 Da", admet["MW"] < 500),
-        ("LogP", admet["LogP"], "-0.5 to 5", -0.5 <= admet["LogP"] <= 5),
-        ("H-bond donors", admet["HBD"], "≤ 5", admet["HBD"] <= 5),
-        ("H-bond acceptors", admet["HBA"], "≤ 10", admet["HBA"] <= 10),
-        ("Rotatable bonds", admet["RotBonds"], "≤ 10", admet["RotBonds"] <= 10),
+        ("Molecular weight", admet["MW"],       "< 500 Da",    admet["MW"] < 500),
+        ("LogP",             admet["LogP"],      "-0.5 to 5",   -0.5 <= admet["LogP"] <= 5),
+        ("H-bond donors",    admet["HBD"],       "≤ 5",         admet["HBD"] <= 5),
+        ("H-bond acceptors", admet["HBA"],       "≤ 10",        admet["HBA"] <= 10),
+        ("Rotatable bonds",  admet["RotBonds"],  "≤ 10",        admet["RotBonds"] <= 10),
     ]
-
     df = pd.DataFrame([
-        {"Property": r[0], "Value": r[1], "Ideal": r[2], "Pass": "✅" if r[3] else "❌"}
-        for r in rules
+        {"Property": n, "Value": v, "Ideal": i, "Pass": "✅" if p else "❌"}
+        for n, v, i, p in rules
     ])
     st.dataframe(df, use_container_width=True, hide_index=True)
 
     if not st.session_state.stage5_done:
-        if admet["pass"]:
+        if admet.get("pass"):
             add_score(15)
             add_badge("💎 Lipinski Compliant")
 
-        if admet["warning"]:
-            st.markdown(f"""
-            <div class="warning-box">
-                <strong>Post-market alert</strong><br>{admet['warning']}
-            </div>
-            """, unsafe_allow_html=True)
-            if "FDA pulled" in admet["warning"] or "withdrawn" in admet["warning"].lower():
+        if admet.get("warning"):
+            st.markdown(f"""<div class="warning-box">
+                <b>Post-market alert</b><br>{admet['warning']}
+            </div>""", unsafe_allow_html=True)
+            if "withdrew" in admet["warning"].lower() or "fda" in admet["warning"].lower():
                 add_score(-15)
 
         st.session_state.stage5_done = True
@@ -614,52 +511,52 @@ def show_stage_5(case):
             st.rerun()
 
 
-# ==================== FINAL RESULT ====================
+# ── Final result ──────────────────────────────────────────────────────────────
 
 def show_final_result(case):
-    st.subheader("🎉 Mission complete")
-
+    st.subheader("🎉 Mission complete!")
     score = st.session_state.score
-    if score >= 90:
-        title, badge = "Master Medicinal Chemist", "🥇"
-    elif score >= 70:
-        title, badge = "Drug Designer", "🥈"
-    elif score >= 50:
-        title, badge = "Junior Chemist", "🥉"
-    else:
-        title, badge = "Back to the textbooks", "📚"
+
+    if score >= 90:   title, icon = "Master Medicinal Chemist", "🥇"
+    elif score >= 70: title, icon = "Drug Designer",             "🥈"
+    elif score >= 50: title, icon = "Junior Chemist",            "🥉"
+    else:             title, icon = "Back to the textbooks",     "📚"
 
     st.markdown(f"""
-    <div style="background:#eef2ff; color:#1a1a2e; padding:2rem; border-radius:12px; text-align:center; border: 2px solid #5b6cff;">
-        <div style="font-size:3rem; color:#1a1a2e;">{badge}</div>
-        <div style="font-size:1.5rem; font-weight:500; color:#1a1a2e;">{title}</div>
-        <div style="font-size:2rem; font-weight:bold; margin-top:1rem; color:#1a1a2e;">{score} / 100</div>
+    <div style="background:#eef2ff;color:#1a1a2e;padding:1.5rem;
+                border-radius:12px;text-align:center;
+                border:2px solid #5b6cff;margin-bottom:1rem;">
+        <div style="font-size:2.5rem;color:#1a1a2e;">{icon}</div>
+        <div style="font-size:1.3rem;font-weight:600;color:#1a1a2e;">{title}</div>
+        <div style="font-size:2rem;font-weight:700;margin-top:.5rem;
+                    color:#1a1a2e;font-family:monospace;">{score}/100</div>
     </div>
     """, unsafe_allow_html=True)
 
-    st.markdown(f"_{case['ending']}_")
+    st.markdown(f"*{case['ending']}*")
 
-    # Badges earned
     if st.session_state.badges:
-        st.markdown("### 🏆 Badges earned")
-        badges_html = "".join([f'<span class="badge">{b}</span>' for b in st.session_state.badges])
-        st.markdown(badges_html, unsafe_allow_html=True)
+        st.markdown("**Badges earned:**")
+        st.markdown(" ".join(
+            f'<span class="badge">{b}</span>'
+            for b in st.session_state.badges
+        ), unsafe_allow_html=True)
 
-    # Submit to leaderboard
-    from leaderboard import show_score_submission
-    show_score_submission(case, score, st.session_state.badges)
+    try:
+        from leaderboard import show_score_submission
+        show_score_submission(case, score, st.session_state.badges)
+    except Exception:
+        pass
 
     st.divider()
-
-    col1, col2 = st.columns(2)
-    with col1:
-        if st.button("🔄 Replay this case", use_container_width=True):
-            reset_game()
-            st.rerun()
-    with col2:
-        if st.button("📚 Try another case", use_container_width=True, type="primary"):
-            from cases import CASES
-            next_index = (st.session_state.case_index + 1) % len(CASES)
-            st.session_state.case_index = next_index
-            reset_game()
-            st.rerun()
+    c1, c2 = st.columns(2)
+    with c1:
+        if st.button("🔄 Replay", use_container_width=True):
+            reset_game(); st.rerun()
+    with c2:
+        from cases import CASES
+        if st.button("📚 Next case", use_container_width=True, type="primary"):
+            st.session_state.case_index = (
+                (st.session_state.case_index + 1) % len(CASES)
+            )
+            reset_game(); st.rerun()
