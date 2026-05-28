@@ -1,5 +1,5 @@
 """
-Utility functions for CSI Drug Discovery game.
+Utility functions for Drug Hunter game.
 Handles session state, rendering, and scoring logic.
 """
 
@@ -79,23 +79,85 @@ def add_badge(badge):
 
 # ==================== UI HELPERS ====================
 
+STAGE_LABELS = ["Identify\nTarget", "Find\nPocket", "Dock\nLigands", "Selectivity", "ADMET"]
+
+def show_top_bar(case, page):
+    """
+    Always-visible branded header — shows Drug Hunter name, score,
+    and current case on every screen size including mobile.
+    """
+    score = st.session_state.score
+    stage = st.session_state.current_stage
+    if page == "🎮 Play":
+        right_info = (
+            f'<span class="dh-score-pill">'
+            f'Score: <b>{score}</b> &nbsp;|&nbsp; Stage <b>{min(stage,5)}/5</b>'
+            f'</span>'
+        )
+    else:
+        right_info = '<span class="dh-score-pill">Drug Hunter</span>'
+
+    st.markdown(f"""
+    <div class="dh-topbar">
+        <div>
+            <p class="dh-title">🧬 Drug Hunter</p>
+            <p class="dh-subtitle">By Sarang Dhote &nbsp;·&nbsp; Shivaji Science College, Nagpur</p>
+        </div>
+        {right_info}
+    </div>
+    """, unsafe_allow_html=True)
+
+
+def show_progress_stepper():
+    """
+    Mobile-friendly horizontal step tracker.
+    Uses pure HTML/CSS — no st.columns, works on any screen width.
+    """
+    current = st.session_state.current_stage   # 1-5 (6 = final)
+    n = 5
+    steps_html = ""
+    for i in range(n):
+        step_num = i + 1
+        if step_num < current:
+            circle_cls = "done"
+            label_cls  = "done-lbl"
+            icon = "✓"
+        elif step_num == current:
+            circle_cls = "active"
+            label_cls  = "active-lbl"
+            icon = str(step_num)
+        else:
+            circle_cls = "todo"
+            label_cls  = ""
+            icon = str(step_num)
+
+        label = STAGE_LABELS[i].replace("\n", "<br>")
+
+        # Connector line between steps
+        if i > 0:
+            if step_num <= current:
+                conn_cls = "done"
+            else:
+                conn_cls = "todo"
+            steps_html += f'<div class="dh-connector {conn_cls}"></div>'
+
+        steps_html += f"""
+        <div class="dh-step">
+            <div class="dh-step-circle {circle_cls}">{icon}</div>
+            <div class="dh-step-label {label_cls}">{label}</div>
+        </div>"""
+
+    st.markdown(f'<div class="dh-stepper">{steps_html}</div>', unsafe_allow_html=True)
+
+
 def show_header(case):
+    """Kept for backward compatibility — now just shows case title."""
     st.markdown(f"### Case #{case['id']}: {case['title']}")
-    st.caption(f"{case['disease']}  ·  {case['difficulty']}")
 
 
 def show_progress_bar():
-    """Visual progress through 5 stages."""
-    stages_done = st.session_state.current_stage - 1
-    cols = st.columns(5)
-    for i, col in enumerate(cols):
-        with col:
-            if i < stages_done:
-                st.markdown(f"<div style='background:#2e7d32; height:6px; border-radius:3px;'></div>", unsafe_allow_html=True)
-            elif i == stages_done:
-                st.markdown(f"<div style='background:#1976d2; height:6px; border-radius:3px;'></div>", unsafe_allow_html=True)
-            else:
-                st.markdown(f"<div style='background:#e0e0e0; height:6px; border-radius:3px;'></div>", unsafe_allow_html=True)
+    """Kept for backward compat — calls the new stepper."""
+    show_progress_stepper()
 
 
 # ==================== STAGE 1: TARGET IDENTIFICATION ====================
@@ -210,10 +272,9 @@ def show_stage_2(case):
 
 def show_stage_3(case):
     st.subheader("Stage 3 — Choose & dock candidate ligands")
+    st.markdown("Select **exactly 3** candidates to dock against the target.")
 
-    st.markdown("Select **exactly 3** candidates to dock against the target. Choose wisely — decoys waste your run.")
-
-    # Detect whether real pre-computed scores exist for this case
+    # Check for pre-computed scores
     real_available = False
     if DOCKING_AVAILABLE:
         try:
@@ -223,136 +284,135 @@ def show_stage_3(case):
             real_available = False
 
     if not st.session_state.stage3_done:
-        # Build candidate selection
         picked = []
         for i, cand in enumerate(case["candidates"]):
             col1, col2 = st.columns([1, 6])
             with col1:
-                checked = st.checkbox("", key=f"s3_check_{i}", label_visibility="collapsed")
+                checked = st.checkbox("", key=f"s3_check_{i}",
+                                      label_visibility="collapsed")
             with col2:
-                st.markdown(f"**{cand['name']}** — _{cand['desc']}_  \n`SMILES: {cand['smiles']}`")
+                st.markdown(f"**{cand['name']}** — _{cand['desc']}_  \n"
+                            f"`SMILES: {cand['smiles']}`")
             if checked:
                 picked.append(i)
 
         st.session_state.stage3_picks = picked
         st.write(f"Selected: **{len(picked)} / 3**")
 
-        # Docking mode selector — real scores are REQUIRED
-        live_mode = False
+        # Status banner
         if real_available:
-            st.caption("🟢 Real pre-computed AutoDock Vina scores are available for this case.")
+            st.info("🟢 Pre-computed real Vina scores available — results will be instant.")
         elif DOCKING_AVAILABLE:
-            st.warning(
-                "⚠️ No pre-computed scores for this case yet. "
-                "Enable live docking below to compute **real** Vina scores now, "
-                "or run `python precompute_docking.py` to generate them in advance."
-            )
-            live_mode = st.checkbox(
-                "⚡ Run REAL docking now (AutoDock Vina — slower, ~1-3 min for 3 ligands)",
-                help="Runs actual Vina docking live. Downloads the Vina binary and PDB on first run."
-            )
+            st.info("⚡ No pre-computed scores yet — clicking **Run docking** will run "
+                    "real AutoDock Vina live (~30–90 s per ligand). "
+                    "Scores are saved after the first run so future plays are instant.")
         else:
-            st.error(
-                "❌ The docking engine isn't available in this environment, and no "
-                "pre-computed scores exist. This stage needs real docking data. "
-                "Run `python precompute_docking.py` on a machine with RDKit installed."
-            )
+            st.error("❌ Neither the docking engine nor pre-computed scores are available. "
+                     "Install requirements and run `python precompute_docking.py` first.")
 
-        if len(picked) == 3:
-            # Only allow docking if we can produce REAL scores
-            can_dock = real_available or (live_mode and DOCKING_AVAILABLE)
+        if len(picked) > 3:
+            st.warning("Please select only 3 candidates.")
 
-            run_clicked = st.button(
-                "🔬 Run docking",
-                type="primary",
-                disabled=not can_dock
-            )
+        can_dock = real_available or DOCKING_AVAILABLE
+        run_clicked = st.button("🔬 Run docking", type="primary",
+                                disabled=(len(picked) != 3 or not can_dock))
 
-            if not can_dock and not real_available:
-                st.caption("Enable live docking above to proceed with real scores.")
+        if run_clicked and len(picked) == 3 and can_dock:
+            chosen = [case["candidates"][i] for i in picked]
+            all_ok = True
 
-            if run_clicked and can_dock:
-                chosen = [case["candidates"][i] for i in picked]
-                docking_failed = False
+            if real_available:
+                # --- LOOKUP mode: instant ---
+                for cand in chosen:
+                    cand["_score"] = resolve_score(case["id"], cand, "target")
+                    if cand["_score"] is None:
+                        all_ok = False
+                if not all_ok:
+                    # Some pre-computed scores missing — fall through to live
+                    real_available = False
 
-                if live_mode and not real_available:
-                    # LIVE Vina docking
-                    from docking import dock
-                    progress = st.progress(0, text="Starting AutoDock Vina...")
-                    for idx, cand in enumerate(chosen):
-                        progress.progress(
-                            int(idx / len(chosen) * 100),
-                            text=f"Docking {cand['name']}... (real Vina, please wait)"
-                        )
-                        ok, result = dock(cand["smiles"], case["target_pdb"], exhaustiveness=4)
-                        if ok:
-                            cand["_score"] = result
-                            # Cache the real result for future runs
-                            from docking import save_score
-                            save_score(case["id"], cand["name"], "target", result)
-                        else:
-                            cand["_score"] = None
-                            docking_failed = True
-                            st.error(f"Docking failed for {cand['name']}: {result}")
-                    progress.progress(100, text="Docking complete!")
-                else:
-                    # LOOKUP real pre-computed scores
-                    for cand in chosen:
-                        score = resolve_score(case["id"], cand, "target")
-                        cand["_score"] = score
-                        if score is None:
-                            docking_failed = True
-
-                # If any score is missing, do NOT proceed with fake data
-                if docking_failed or any(c.get("_score") is None for c in chosen):
-                    st.error(
-                        "❌ Could not get real docking scores for all selected ligands. "
-                        "Not showing any results rather than showing fake numbers. "
-                        "Try live docking, or pre-compute scores first."
+            if not real_available:
+                # --- LIVE docking mode ---
+                from docking import dock, save_score as _save
+                bar = st.progress(0, text="Initialising AutoDock Vina…")
+                failed_names = []
+                for idx, cand in enumerate(chosen):
+                    bar.progress(
+                        int(idx / len(chosen) * 90),
+                        text=f"⚗️ Docking {cand['name']} against "
+                             f"{case['target_protein']}… (real Vina)"
                     )
-                else:
-                    # All real — proceed
-                    results = sorted(chosen, key=lambda x: x["_score"])
-                    top = results[0]
-                    st.session_state.stage3_results = results
-                    st.session_state.stage3_top_pick = top
-                    st.session_state.stage3_done = True
-
-                    # Game points based on pedagogical "kind" (not raw score)
-                    if top["kind"] == "best":
-                        add_score(25)
-                        add_badge("💊 Drug Hunter")
-                    elif top["kind"] == "alt":
-                        add_score(15)
-                    elif top["kind"] == "weak":
-                        add_score(-15)
+                    ok, result = dock(
+                        cand["smiles"], case["target_pdb"],
+                        exhaustiveness=4
+                    )
+                    if ok:
+                        cand["_score"] = result
+                        _save(case["id"], cand["name"], "target", result)
                     else:
-                        add_score(-20)
-                    st.rerun()
-        elif len(picked) > 3:
-            st.warning("Please select only 3.")
+                        cand["_score"] = None
+                        all_ok = False
+                        failed_names.append(f"{cand['name']}: {result}")
+                bar.progress(100, text="Docking complete!")
+
+                if not all_ok:
+                    st.error(
+                        "❌ Docking failed for: " + "; ".join(failed_names) + "\n\n"
+                        "Common causes:\n"
+                        "- PDB download failed (check internet connection)\n"
+                        "- SMILES could not be converted to 3D (check validity)\n\n"
+                        "Please choose different candidates or try again."
+                    )
+                    # Recover: use whatever scores succeeded; skip None
+                    chosen = [c for c in chosen if c.get("_score") is not None]
+                    if len(chosen) < 2:
+                        return   # not enough to compare
+
+            # Sort by score (lower = stronger binding)
+            results = sorted(chosen, key=lambda x: x["_score"])
+            top = results[0]
+            st.session_state.stage3_results = results
+            st.session_state.stage3_top_pick = top
+            st.session_state.stage3_done = True
+
+            # Points based on pedagogical category
+            if top["kind"] == "best":
+                add_score(25)
+                add_badge("💊 Drug Hunter")
+            elif top["kind"] == "alt":
+                add_score(15)
+            elif top["kind"] == "weak":
+                add_score(-15)
+            else:
+                add_score(-20)
+            st.rerun()
+
     else:
-        # Show results
+        # ── Show results ──────────────────────────────────────────────────
         results = st.session_state.stage3_results
         top = st.session_state.stage3_top_pick
 
-        # All scores here are guaranteed real
         st.caption("🟢 Showing **real AutoDock Vina** docking scores.")
 
-        # Bar chart (all scores are real Vina values)
-        names = [r["name"] for r in results]
+        names  = [r["name"] for r in results]
         scores = [r["_score"] for r in results]
-        colors = ["#2e7d32" if r["kind"] in ("best", "alt") else
-                  "#888888" if r["kind"] == "decoy" else "#f57c00" for r in results]
+        colors = ["#1A7A6E" if r["kind"] in ("best", "alt") else
+                  "#888888" if r["kind"] == "decoy" else "#E8A020"
+                  for r in results]
 
-        fig = go.Figure(data=[
-            go.Bar(x=names, y=scores, marker_color=colors, text=scores, textposition='outside')
-        ])
+        import plotly.graph_objects as go
+        fig = go.Figure(data=[go.Bar(
+            x=names, y=scores,
+            marker_color=colors,
+            text=[f"{s:.1f}" for s in scores],
+            textposition="outside"
+        )])
         fig.update_layout(
             title="Docking scores (more negative = stronger binding)",
             yaxis_title="Binding affinity (kcal/mol)",
-            height=350,
-            showlegend=False,
+            height=340, showlegend=False,
+            plot_bgcolor="rgba(0,0,0,0)",
+            paper_bgcolor="rgba(0,0,0,0)",
         )
         st.plotly_chart(fig, use_container_width=True)
 
@@ -360,36 +420,33 @@ def show_stage_3(case):
             st.markdown(f"""
             <div class="success-box">
                 <strong>✅ Top binder: {top['name']} (+25 points)</strong><br>
-                Strong binding to {case['target_protein']}. But we still need to check selectivity in the next stage.
-            </div>
-            """, unsafe_allow_html=True)
-            can_continue = True
+                Strong binding to {case['target_protein']}.
+                Now check whether it is selective in stage 4.
+            </div>""", unsafe_allow_html=True)
+            can_continue = top["name"] in case["selectivity_data"]
         elif top["kind"] == "alt":
             st.markdown(f"""
             <div class="warning-box">
                 <strong>⚠️ Top binder: {top['name']} (+15 points)</strong><br>
-                Selective binder — but a surprise may await in stage 5...
-            </div>
-            """, unsafe_allow_html=True)
-            can_continue = True
+                Selective binder — a surprise may await in stage 5…
+            </div>""", unsafe_allow_html=True)
+            can_continue = top["name"] in case["selectivity_data"]
         elif top["kind"] == "weak":
             st.markdown(f"""
             <div class="danger-box">
-                <strong>❌ Weak binding (−15 points)</strong><br>
-                These bind but aren't ideal candidates. Re-select.
-            </div>
-            """, unsafe_allow_html=True)
+                <strong>❌ Weak binder (−15 points)</strong><br>
+                These candidates bind poorly. Try again with stronger choices.
+            </div>""", unsafe_allow_html=True)
             can_continue = False
         else:
             st.markdown(f"""
             <div class="danger-box">
                 <strong>❌ Top pick is a decoy (−20 points)</strong><br>
-                Look at the structures more carefully.
-            </div>
-            """, unsafe_allow_html=True)
+                Check the structures before selecting.
+            </div>""", unsafe_allow_html=True)
             can_continue = False
 
-        if can_continue and top["name"] in case["selectivity_data"]:
+        if can_continue:
             if st.button("Continue to stage 4 →", type="primary"):
                 st.session_state.current_stage = 4
                 st.rerun()
@@ -397,6 +454,9 @@ def show_stage_3(case):
             if st.button("Try again"):
                 st.session_state.stage3_done = False
                 st.rerun()
+
+
+
 
 
 # ==================== STAGE 4: SELECTIVITY ====================
