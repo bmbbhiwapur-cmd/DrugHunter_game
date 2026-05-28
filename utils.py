@@ -151,7 +151,9 @@ def show_stage_1(case):
                     add_badge("🧠 Target Tracker")
                 else:
                     add_score(-10)
-                st.rerun()
+                break   # ← CRITICAL: stop loop so other buttons don't fire
+        if st.session_state.stage1_answered:
+            st.rerun()
     else:
         if st.session_state.stage1_correct:
             st.markdown(f"""<div class="success-box">
@@ -202,7 +204,9 @@ def show_stage_2(case):
                     add_badge("🎯 Pocket Finder")
                 else:
                     add_score(-10)
-                st.rerun()
+                break   # ← stop loop
+        if st.session_state.stage2_answered:
+            st.rerun()
     else:
         if st.session_state.stage2_correct:
             st.markdown(f"""<div class="success-box">
