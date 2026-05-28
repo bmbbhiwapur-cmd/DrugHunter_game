@@ -1,6 +1,6 @@
-# 🧬 CSI: Drug Discovery — Educational Game
+# 🧬 Drug Hunter — Educational Game
 
-An interactive educational game for UG/PG students learning **molecular docking** and **drug discovery**. Built with Streamlit.
+An interactive educational game for UG/PG students learning **molecular docking** and **drug discovery**. Built by Sarang Dhote.
 
 ## 🎮 How it works
 
