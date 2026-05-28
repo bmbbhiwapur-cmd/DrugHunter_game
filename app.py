@@ -5,7 +5,6 @@ Developed by Sarang Dhote, Shivaji Science College, Nagpur
 
 import streamlit as st
 
-# ── Page config ───────────────────────────────────────────────────────────────
 st.set_page_config(
     page_title="Drug Hunter",
     page_icon="🧬",
@@ -13,36 +12,31 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
 )
 
-# ── CSS (mobile-first) ────────────────────────────────────────────────────────
 st.markdown("""
 <style>
-.block-container{padding-top:0.5rem!important;}
-
-/* Top bar */
+.block-container{padding-top:.5rem!important;}
 .dh-topbar{
     background:linear-gradient(135deg,#0D1B2A 0%,#1A3A5C 100%);
-    color:#fff;padding:10px 16px 8px;border-radius:10px;
-    margin-bottom:12px;display:flex;align-items:center;
-    justify-content:space-between;flex-wrap:wrap;gap:6px;
+    padding:10px 16px 8px;border-radius:10px;margin-bottom:12px;
+    display:flex;align-items:center;justify-content:space-between;
+    flex-wrap:wrap;gap:6px;
 }
 .dh-title{font-size:1.35rem;font-weight:700;color:#fff!important;margin:0;}
-.dh-subtitle{font-size:0.72rem;color:#90CAF9!important;margin:0;}
+.dh-subtitle{font-size:.72rem;color:#90CAF9!important;margin:0;}
 .dh-score-pill{
     background:rgba(255,255,255,.15);border-radius:20px;
     padding:4px 14px;font-size:.82rem;color:#fff!important;white-space:nowrap;
 }
 .dh-score-pill b{color:#FFD54F!important;}
-
-/* Progress stepper */
 .dh-stepper{
-    display:flex;align-items:center;
-    justify-content:space-between;margin:14px 0 8px;padding:0 2px;
+    display:flex;align-items:center;justify-content:space-between;
+    margin:14px 0 8px;padding:0 2px;
 }
 .dh-step{display:flex;flex-direction:column;align-items:center;flex:1;}
 .dh-step-circle{
     width:28px;height:28px;border-radius:50%;display:flex;
     align-items:center;justify-content:center;
-    font-size:.75rem;font-weight:700;position:relative;z-index:2;
+    font-size:.75rem;font-weight:700;z-index:2;
 }
 .dh-step-circle.done  {background:#1A7A6E;color:#fff;}
 .dh-step-circle.active{background:#1565C0;color:#fff;
@@ -53,10 +47,8 @@ st.markdown("""
 .dh-step-label.active-lbl{color:#1565C0;font-weight:600;}
 .dh-step-label.done-lbl{color:#1A7A6E;}
 .dh-connector{flex:1;height:3px;margin-bottom:18px;border-radius:2px;}
-.dh-connector.done  {background:#1A7A6E;}
-.dh-connector.todo  {background:#E2E8F0;}
-
-/* Feedback boxes */
+.dh-connector.done{background:#1A7A6E;}
+.dh-connector.todo{background:#E2E8F0;}
 .case-card{background:#eef2ff!important;color:#1a1a2e!important;
            padding:1rem 1.25rem;border-radius:10px;
            border-left:4px solid #5b6cff;margin-bottom:1rem;}
@@ -76,7 +68,6 @@ st.markdown("""
 .badge{display:inline-block;background:#e3f2fd!important;
        color:#0d47a1!important;padding:4px 12px;
        border-radius:12px;font-size:.85rem;margin:4px;font-weight:500;}
-
 @media(max-width:600px){
     .dh-title{font-size:1.1rem;}
     .dh-step-circle{width:24px;height:24px;font-size:.65rem;}
@@ -85,7 +76,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ── Safe imports ──────────────────────────────────────────────────────────────
+# ── Imports ───────────────────────────────────────────────────────────────────
 from cases import CASES
 from utils import (
     init_session_state, reset_game,
@@ -95,73 +86,80 @@ from utils import (
 )
 from leaderboard import show_leaderboard_page, show_player_lookup
 
-# ── Session ───────────────────────────────────────────────────────────────────
+# ── Init ──────────────────────────────────────────────────────────────────────
 init_session_state()
 if "page" not in st.session_state:
     st.session_state.page = "🎮 Play"
 
-# ── Sidebar (desktop convenience — not required for navigation) ───────────────
+# ── Sidebar (desktop) ─────────────────────────────────────────────────────────
 with st.sidebar:
     st.markdown("### 🧬 Drug Hunter")
-    st.caption("By Sarang Dhote\nShivaji Science College, Nagpur")
+    st.caption("By Sarang Dhote · Shivaji Science College, Nagpur")
     st.divider()
-    if st.session_state.page == "🎮 Play":
-        case_names = [f"{i+1}. {c['title']}" for i, c in enumerate(CASES)]
-        idx = st.selectbox("Case", range(len(CASES)),
-                           format_func=lambda i: case_names[i],
-                           index=st.session_state.case_index,
-                           key="sb_case")
-        if idx != st.session_state.case_index:
-            st.session_state.case_index = idx
-            reset_game(); st.rerun()
-        st.divider()
-        st.metric("Score", st.session_state.score)
-        st.metric("Stage", f"{st.session_state.current_stage}/5")
-        st.divider()
-        if st.button("🔄 Reset", use_container_width=True):
-            reset_game(); st.rerun()
-    st.caption(f"📊 {len(CASES)} disease cases\n⚗️ Real AutoDock Vina")
+    case_names = [f"{i+1}. {c['title']}" for i, c in enumerate(CASES)]
+    sb_idx = st.selectbox(
+        "Case", range(len(CASES)),
+        format_func=lambda i: case_names[i],
+        index=st.session_state.case_index,
+        key="sb_case",
+    )
+    if sb_idx != st.session_state.case_index:
+        st.session_state.case_index = sb_idx
+        reset_game()
+        st.rerun()
+    st.divider()
+    st.metric("Score", st.session_state.score)
+    st.metric("Stage", f"{st.session_state.current_stage}/5")
+    st.divider()
+    if st.button("🔄 Reset case", use_container_width=True):
+        reset_game()
+        st.rerun()
+    st.caption(f"📊 {len(CASES)} cases  ·  Real AutoDock Vina")
 
 # ── Main area ─────────────────────────────────────────────────────────────────
 page = st.session_state.page
 case = CASES[st.session_state.case_index]
 
-# Always-visible top bar
 show_top_bar(case, page)
 
-# Horizontal navigation (works on mobile — no sidebar needed)
+# Horizontal navigation (visible on mobile)
 NAV = ["🎮 Play", "🏆 Leaderboard", "🔍 Player stats"]
-selected = st.radio("", NAV, index=NAV.index(page),
-                    horizontal=True, key="main_nav",
-                    label_visibility="collapsed")
+selected = st.radio(
+    "", NAV,
+    index=NAV.index(page),
+    horizontal=True,
+    key="main_nav",
+    label_visibility="collapsed",
+)
 if selected != page:
     st.session_state.page = selected
     st.rerun()
 
 st.divider()
 
-# ── Pages ─────────────────────────────────────────────────────────────────────
+# ── Play page ─────────────────────────────────────────────────────────────────
 if page == "🎮 Play":
 
-    # Case selector — always visible on mobile
-    case_names = [f"{i+1}. {c['title']}" for i, c in enumerate(CASES)]
+    # Inline case selector (always visible — needed on mobile)
     new_idx = st.selectbox(
-        "📂 Case", range(len(CASES)),
+        "📂 Select case",
+        range(len(CASES)),
         index=st.session_state.case_index,
         format_func=lambda i: case_names[i],
         key="main_case",
     )
     if new_idx != st.session_state.case_index:
         st.session_state.case_index = new_idx
-        reset_game(); st.rerun()
-    case = CASES[st.session_state.case_index]
+        reset_game()
+        st.rerun()
 
+    case = CASES[st.session_state.case_index]
     st.caption(f"🏥 {case['disease']}  ·  {case['difficulty']}")
     show_progress_stepper()
     st.divider()
 
     stage = st.session_state.current_stage
-    if stage == 1:   show_stage_1(case)
+    if   stage == 1: show_stage_1(case)
     elif stage == 2: show_stage_2(case)
     elif stage == 3: show_stage_3(case)
     elif stage == 4: show_stage_4(case)
@@ -170,6 +168,5 @@ if page == "🎮 Play":
 
 elif page == "🏆 Leaderboard":
     show_leaderboard_page()
-
 elif page == "🔍 Player stats":
     show_player_lookup()
