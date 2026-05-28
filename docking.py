@@ -1,13 +1,10 @@
 """
-Real molecular docking engine for Drug Hunter game.
-Developed by Sarang Dhote, Shivaji Science College, Nagpur.
+Drug Hunter — Docking engine
+Developed by Sarang Dhote, Shivaji Science College, Nagpur
 
-Uses the vina Python package (pip install vina) — no binary download needed,
-works on Streamlit Cloud out of the box.
-
-Two modes:
-  LOOKUP — reads docking_results.json instantly (pre-computed)
-  LIVE   — runs real AutoDock Vina via the Python API (~15-60s per ligand)
+IMPORTANT: All heavy imports (rdkit, vina) are LAZY — inside functions only.
+This file can be imported safely even if rdkit/vina are not installed.
+The app will never crash because of this file.
 """
 
 import json
@@ -15,45 +12,34 @@ import os
 import urllib.request
 from pathlib import Path
 
-import numpy as np
-
-try:
-    from rdkit import Chem
-    from rdkit.Chem import AllChem
-    RDKIT_OK = True
-except ImportError:
-    RDKIT_OK = False
-
-try:
-    from vina import Vina as _Vina
-    VINA_OK = True
-except ImportError:
-    VINA_OK = False
-except Exception:
-    # Some systems have vina installed but fail at runtime (missing libs)
-    VINA_OK = False
-
 RESULTS_FILE  = Path("docking_results.json")
 PDB_CACHE_DIR = Path("pdb_cache")
-PDB_CACHE_DIR.mkdir(exist_ok=True)
 
 
-def health_check():
-    """
-    Returns (ok: bool, message: str).
-    Called at app startup to show a friendly error instead of a crash.
-    """
-    issues = []
-    if not RDKIT_OK:
-        issues.append("RDKit not installed — run: pip install rdkit")
-    if not VINA_OK:
-        issues.append("vina not installed — run: pip install vina")
-    if issues:
-        return False, " | ".join(issues)
-    return True, "Docking engine ready"
+# ── Availability checks (lazy — never crash on import) ───────────────────────
+
+def _rdkit_ok():
+    try:
+        from rdkit import Chem  # noqa
+        return True
+    except Exception:
+        return False
 
 
-# ── Lookup mode ───────────────────────────────────────────────────────────────
+def _vina_ok():
+    try:
+        from vina import Vina  # noqa
+        return True
+    except Exception:
+        return False
+
+
+def docking_available():
+    """Returns True only if both rdkit and vina are working."""
+    return _rdkit_ok() and _vina_ok()
+
+
+# ── Lookup (pre-computed scores) ─────────────────────────────────────────────
 
 def _load():
     if RESULTS_FILE.exists():
@@ -66,6 +52,7 @@ def _load():
 
 
 def get_score(case_id, ligand_name, protein_type="target"):
+    """Return pre-computed score or None."""
     return _load().get(f"{case_id}_{ligand_name}_{protein_type}")
 
 
@@ -83,98 +70,94 @@ def has_results_for_case(case_id):
 # ── Structure preparation ─────────────────────────────────────────────────────
 
 def fetch_pdb(pdb_id):
+    """Download PDB from RCSB, cache locally."""
+    PDB_CACHE_DIR.mkdir(exist_ok=True)
     pdb_id  = pdb_id.strip().lower()
     local   = PDB_CACHE_DIR / f"{pdb_id}.pdb"
     if local.exists():
         return True, str(local)
-    url = f"https://files.rcsb.org/download/{pdb_id}.pdb"
     try:
-        urllib.request.urlretrieve(url, str(local))
+        urllib.request.urlretrieve(
+            f"https://files.rcsb.org/download/{pdb_id}.pdb", str(local)
+        )
         return True, str(local)
     except Exception as e:
         return False, f"Could not download {pdb_id.upper()}: {e}"
 
 
-_TYPE = {
-    "C": "C", "A": "A", "N": "N", "NA": "NA", "O": "O", "OA": "OA",
-    "S": "S", "SA": "SA", "H": "HD", "P": "P", "F": "F",
-    "CL": "Cl", "BR": "Br", "I": "I", "ZN": "Zn", "MG": "Mg",
-    "CA": "Ca", "FE": "Fe", "MN": "Mn",
-}
-
-_SKIP_HETATM = {
-    "HOH","WAT","DOD","NA","CL","K","MG","CA","ZN","MN","FE","CU","NI",
+_SKIP = {
+    "HOH","WAT","DOD","NA","CL","K","MG","CA","ZN","MN","FE","CU",
     "SO4","PO4","GOL","EDO","ACT","DMS","PEG","FMT","TRS","EPE","BME",
-    "MES","IOD","BR","NO3","CO3","NH4","FLC","CIT","MPD","BOG","CSD",
+    "MES","IOD","NO3","CO3","NH4","CIT","MPD",
+}
+
+_TYPES = {
+    "C":"C","N":"N","NA":"NA","O":"O","OA":"OA","S":"S","SA":"SA",
+    "H":"HD","P":"P","F":"F","CL":"Cl","BR":"Br","I":"I",
+    "ZN":"Zn","MG":"Mg","CA":"Ca","FE":"Fe",
 }
 
 
-def pdb_to_pdbqt(pdb_path, out_path, is_ligand=False):
-    """Convert PDB → PDBQT. Receptor: ATOM only, no H. Ligand: HETATM + ATOM."""
+def _pdb_to_pdbqt(pdb_path, out_path, is_ligand=False):
+    """Convert PDB to PDBQT format."""
+    import numpy as np  # already in requirements
+
     torsions = 0
-    if is_ligand and RDKIT_OK:
+    if is_ligand and _rdkit_ok():
         try:
+            from rdkit import Chem
+            from rdkit.Chem import AllChem
             m = Chem.MolFromPDBFile(pdb_path, removeHs=False)
             if m:
                 torsions = AllChem.CalcNumRotatableBonds(m)
         except Exception:
             torsions = 4
+
     try:
         with open(pdb_path) as fi, open(out_path, "w") as fo:
             if is_ligand:
                 fo.write("ROOT\n")
             for line in fi:
-                if is_ligand:
-                    keep = line.startswith(("ATOM", "HETATM"))
-                else:
-                    keep = line.startswith("ATOM")
+                keep = line.startswith("ATOM") if not is_ligand else line.startswith(("ATOM","HETATM"))
                 if not keep:
                     continue
                 try:
-                    atom_id  = int(line[6:11])
-                except ValueError:
-                    atom_id  = 1
-                atom_name = line[12:16]
-                res_name  = line[17:20].strip()
-                chain     = line[21].strip() or "A"
-                try:
-                    res_seq = int(line[22:26])
-                except ValueError:
-                    res_seq = 1
-                try:
-                    x, y, z = float(line[30:38]), float(line[38:46]), float(line[46:54])
-                except ValueError:
+                    atom_id   = int(line[6:11])
+                    atom_name = line[12:16]
+                    res_name  = line[17:20].strip()
+                    chain     = line[21].strip() or "A"
+                    res_seq   = int(line[22:26])
+                    x, y, z   = float(line[30:38]), float(line[38:46]), float(line[46:54])
+                except (ValueError, IndexError):
                     continue
                 elem = line[76:78].strip()
                 if not elem:
                     elem = "".join(c for c in atom_name if c.isalpha())[:1]
                 elem = "".join(c for c in elem if c.isalpha()).upper()
-                # skip receptor hydrogens
                 if not is_ligand and elem == "H":
                     continue
-                vtype = _TYPE.get(elem, elem.title())
+                vtype  = _TYPES.get(elem, elem.title())
                 if elem == "C" and "AR" in atom_name.upper():
                     vtype = "A"
-                record = "HETATM" if is_ligand else "ATOM"
+                rec = "HETATM" if is_ligand else "ATOM"
                 fo.write(
-                    f"{record:<6}{atom_id:>5} {atom_name:<4} {res_name:>3} "
+                    f"{rec:<6}{atom_id:>5} {atom_name:<4} {res_name:>3} "
                     f"{chain}{res_seq:>4}    {x:>8.3f}{y:>8.3f}{z:>8.3f}"
                     f"  1.00  0.00    +0.000 {vtype:<2}\n"
                 )
-            if is_ligand:
-                fo.write("ENDROOT\n")
-                fo.write(f"TORSDOF {torsions}\n")
-            else:
-                fo.write("END\n")
+            fo.write("ENDROOT\nTORSDOF {}\n".format(torsions) if is_ligand else "END\n")
         return True, out_path
     except Exception as e:
         return False, str(e)
 
 
-def smiles_to_pdbqt(smiles, out_path):
-    if not RDKIT_OK:
-        return False, "RDKit not installed"
+def _smiles_to_pdbqt(smiles, out_path):
+    """SMILES → 3D PDBQT using RDKit."""
+    if not _rdkit_ok():
+        return False, "RDKit not available"
     try:
+        from rdkit import Chem
+        from rdkit.Chem import AllChem
         mol = Chem.MolFromSmiles(smiles)
         if mol is None:
             return False, "Invalid SMILES"
@@ -185,7 +168,7 @@ def smiles_to_pdbqt(smiles, out_path):
         AllChem.MMFFOptimizeMolecule(mol)
         tmp = out_path.replace(".pdbqt", "_tmp.pdb")
         Chem.MolToPDBFile(mol, tmp)
-        ok, msg = pdb_to_pdbqt(tmp, out_path, is_ligand=True)
+        ok, msg = _pdb_to_pdbqt(tmp, out_path, is_ligand=True)
         try:
             os.remove(tmp)
         except Exception:
@@ -195,8 +178,9 @@ def smiles_to_pdbqt(smiles, out_path):
         return False, str(e)
 
 
-def active_site_box(pdb_path):
-    """Centre the docking grid on the co-crystallised ligand (best practice)."""
+def _active_site_box(pdb_path):
+    """Find binding pocket from co-crystallised ligand."""
+    import numpy as np
     coords = {}
     try:
         with open(pdb_path) as f:
@@ -204,13 +188,13 @@ def active_site_box(pdb_path):
                 if not line.startswith("HETATM"):
                     continue
                 res = line[17:20].strip()
-                if res in _SKIP_HETATM:
+                if res in _SKIP:
                     continue
                 key = f"{res}-{line[21]}-{line[22:26].strip()}"
                 try:
-                    coords.setdefault(key, []).append([
-                        float(line[30:38]), float(line[38:46]), float(line[46:54])
-                    ])
+                    coords.setdefault(key, []).append(
+                        [float(line[30:38]), float(line[38:46]), float(line[46:54])]
+                    )
                 except ValueError:
                     continue
     except Exception:
@@ -218,22 +202,23 @@ def active_site_box(pdb_path):
     if not coords:
         return None
     best = max(coords, key=lambda k: len(coords[k]))
-    pts = coords[best]
+    pts  = coords[best]
     if len(pts) < 5:
         return None
     arr = np.array(pts)
     cen = arr.mean(axis=0)
     box = np.clip(arr.max(axis=0) - arr.min(axis=0) + 10, 18, 25)
-    return cen[0], cen[1], cen[2], box[0], box[1], box[2]
+    return float(cen[0]), float(cen[1]), float(cen[2]), float(box[0]), float(box[1]), float(box[2])
 
 
-def protein_centroid(pdbqt_path):
-    """Fallback: geometric centre of the whole protein."""
+def _protein_centroid(pdbqt_path):
+    """Fallback: geometric centre of whole protein."""
+    import numpy as np
     pts = []
     try:
         with open(pdbqt_path) as f:
             for line in f:
-                if line.startswith(("ATOM", "HETATM")):
+                if line.startswith(("ATOM","HETATM")):
                     try:
                         pts.append([float(line[30:38]), float(line[38:46]), float(line[46:54])])
                     except ValueError:
@@ -241,54 +226,52 @@ def protein_centroid(pdbqt_path):
     except Exception:
         pass
     if not pts:
-        return 0, 0, 0, 22, 22, 22
+        return 0.0, 0.0, 0.0, 22.0, 22.0, 22.0
     arr = np.array(pts)
     cen = arr.mean(axis=0)
     box = np.clip(arr.max(axis=0) - arr.min(axis=0) + 10, 18, 30)
-    return cen[0], cen[1], cen[2], float(box[0]), float(box[1]), float(box[2])
+    return float(cen[0]), float(cen[1]), float(cen[2]), float(box[0]), float(box[1]), float(box[2])
 
 
 # ── Live docking ──────────────────────────────────────────────────────────────
 
 def dock(smiles, pdb_id, work_dir="dock_tmp", exhaustiveness=4):
     """
-    Run real AutoDock Vina via the Python package API.
-    Returns (True, affinity_kcal_mol) or (False, error_string).
+    Run real AutoDock Vina. Requires rdkit + vina packages.
+    Returns (True, score_kcal_mol) or (False, error_string).
     """
-    if not VINA_OK:
-        return False, "vina package not installed — run: pip install vina"
-    if not RDKIT_OK:
-        return False, "rdkit not installed — run: pip install rdkit"
+    if not _vina_ok():
+        return False, "vina package not available (pip install vina)"
+    if not _rdkit_ok():
+        return False, "rdkit not available (pip install rdkit)"
 
     os.makedirs(work_dir, exist_ok=True)
-    rec_pdbqt = os.path.join(work_dir, "receptor.pdbqt")
-    lig_pdbqt = os.path.join(work_dir, "ligand.pdbqt")
+    rec = os.path.join(work_dir, "receptor.pdbqt")
+    lig = os.path.join(work_dir, "ligand.pdbqt")
 
-    # 1. Receptor
     ok, pdb_path = fetch_pdb(pdb_id)
     if not ok:
         return False, pdb_path
-    ok, msg = pdb_to_pdbqt(pdb_path, rec_pdbqt, is_ligand=False)
-    if not ok:
-        return False, f"Receptor prep failed: {msg}"
 
-    # 2. Ligand
-    ok, msg = smiles_to_pdbqt(smiles, lig_pdbqt)
+    ok, msg = _pdb_to_pdbqt(pdb_path, rec, is_ligand=False)
     if not ok:
-        return False, f"Ligand prep failed: {msg}"
+        return False, f"Receptor prep: {msg}"
 
-    # 3. Grid box — prefer active-site, fall back to centroid
-    box = active_site_box(pdb_path) or protein_centroid(rec_pdbqt)
+    ok, msg = _smiles_to_pdbqt(smiles, lig)
+    if not ok:
+        return False, f"Ligand prep: {msg}"
+
+    box = _active_site_box(pdb_path) or _protein_centroid(rec)
     cx, cy, cz, sx, sy, sz = box
 
-    # 4. Run Vina via Python API (no subprocess, no binary download)
     try:
-        v = _Vina(sf_name="vina", verbosity=0)
-        v.set_receptor(rec_pdbqt)
-        v.set_ligand_from_file(lig_pdbqt)
+        from vina import Vina
+        v = Vina(sf_name="vina", verbosity=0)
+        v.set_receptor(rec)
+        v.set_ligand_from_file(lig)
         v.compute_vina_maps(
-            center=[float(cx), float(cy), float(cz)],
-            box_size=[float(sx), float(sy), float(sz)]
+            center=[cx, cy, cz],
+            box_size=[sx, sy, sz]
         )
         v.dock(exhaustiveness=exhaustiveness, n_poses=5)
         energies = v.energies(n_poses=1)
