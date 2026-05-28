@@ -181,6 +181,18 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# ── Startup health check — shows readable error instead of blank crash ────────
+try:
+    from docking import health_check, VINA_OK, RDKIT_OK
+    _ok, _msg = health_check()
+    if not _ok:
+        st.error(f"⚠️ Docking engine issue: {_msg}")
+        st.info("The game can still run using pre-computed scores. "
+                "Live docking will be unavailable until the issue is resolved.")
+except Exception as _e:
+    st.warning(f"Could not load docking module: {_e}. "
+               "Pre-computed scores will be used if available.")
+
 # ── Session state ─────────────────────────────────────────────────────────────
 init_session_state()
 if "page" not in st.session_state:
