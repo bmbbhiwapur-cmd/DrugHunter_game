@@ -1,9 +1,9 @@
 """
-Drug Hunter — Educational Game
+CSI: Drug Discovery — Educational Game
 Built for UG/PG students learning molecular docking.
 
-Author: Sarang Dhote, Assiatant Professor Chemistry Department Shivaji Csinc College, Nagpur
-License: copyright @ Sarang Dhote
+Author: Your Name
+License: MIT
 """
 
 import streamlit as st
@@ -24,7 +24,7 @@ from leaderboard import show_leaderboard_page, show_player_lookup
 
 # -------------------- PAGE CONFIG --------------------
 st.set_page_config(
-    page_title="Drug Hunter",
+    page_title="CSI: Drug Discovery",
     page_icon="🧬",
     layout="centered",
     initial_sidebar_state="expanded",
@@ -103,7 +103,7 @@ if "page" not in st.session_state:
 
 # -------------------- SIDEBAR --------------------
 with st.sidebar:
-    st.title("🧬 Drug Hunter")
+    st.title("🧬 CSI Drug Discovery")
     st.caption("An educational game for UG/PG students")
 
     st.divider()
@@ -150,7 +150,7 @@ with st.sidebar:
 
     st.divider()
     st.caption(f"📊 {len(CASES)} cases available")
-    st.caption("💡 Built by Sarang Dhote")
+    st.caption("💡 Built with Streamlit")
 
 # -------------------- MAIN AREA --------------------
 
