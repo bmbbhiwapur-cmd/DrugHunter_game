@@ -1,4 +1,4 @@
-# 🧬 CSI: Drug Discovery — Educational Game
+# 🧬 Drug - Hunter — Educational Game
 
 An interactive educational game for UG/PG students learning **molecular docking** and **drug discovery**. Built with Streamlit.
 
@@ -76,7 +76,7 @@ Open `http://localhost:8501` in your browser.
 cd docking-game
 git init
 git add .
-git commit -m "CSI Drug Discovery game with 20 cases + leaderboard"
+git commit -m " Drug - Hunter game with 20 cases + leaderboard"
 git remote add origin https://github.com/YOUR-USERNAME/docking-game.git
 git branch -M main
 git push -u origin main
