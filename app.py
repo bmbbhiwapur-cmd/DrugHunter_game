@@ -54,19 +54,33 @@ st.markdown("""
 /* layout */
 .block-container { padding-top: 0.5rem !important; }
 
-/* top bar */
+/* ── TOP BAR — prominent game name ──────────────────────── */
 .dh-bar {
-    background: linear-gradient(135deg, #0D1B2A, #1A3A5C);
-    border-radius: 10px; padding: 10px 16px 8px;
-    display: flex; align-items: center;
-    justify-content: space-between; flex-wrap: wrap;
-    gap: 6px; margin-bottom: 12px;
+    background: linear-gradient(135deg, #0D1B2A 0%, #1A3A5C 100%);
+    border-radius: 12px;
+    padding: 14px 20px 12px;
+    margin-bottom: 14px;
+    border-left: 5px solid #1A7A6E;
 }
-.dh-title  { font-size:1.3rem; font-weight:700; color:#fff !important; margin:0; }
-.dh-sub    { font-size:.7rem;  color:#90CAF9 !important; margin:0; }
-.dh-pill   { background:rgba(255,255,255,.15); border-radius:20px;
-             padding:4px 14px; font-size:.82rem; color:#fff !important; }
-.dh-pill b { color:#FFD54F !important; }
+.dh-top-row {
+    display: flex; align-items: center;
+    justify-content: space-between; flex-wrap: wrap; gap: 8px;
+}
+.dh-name-block { display: flex; flex-direction: column; gap: 2px; }
+.dh-game-name {
+    font-size: 1.6rem !important; font-weight: 800 !important;
+    color: #FFFFFF !important; margin: 0 !important; line-height: 1.2;
+    letter-spacing: 0.5px;
+}
+.dh-game-name span { color: #1DE9B6 !important; }
+.dh-sub { font-size: .72rem; color: #90CAF9 !important; margin: 0; }
+.dh-pill {
+    background: rgba(255,255,255,.12);
+    border: 1px solid rgba(255,255,255,.2);
+    border-radius: 20px; padding: 5px 16px;
+    font-size: .82rem; color: #fff !important; white-space: nowrap;
+}
+.dh-pill b { color: #FFD54F !important; font-size: .95rem; }
 
 /* stepper */
 .dh-step-row { display:flex; align-items:center; margin:14px 0 8px; }
@@ -165,11 +179,13 @@ stg  = st.session_state.stage
 
 st.markdown(f"""
 <div class="dh-bar">
-  <div>
-    <p class="dh-title">🧬 Drug Hunter</p>
-    <p class="dh-sub">By Sarang Dhote &nbsp;·&nbsp; Shivaji Science College, Nagpur</p>
+  <div class="dh-top-row">
+    <div class="dh-name-block">
+      <p class="dh-game-name">🧬 Drug<span>Hunter</span></p>
+      <p class="dh-sub">By Sarang Dhote &nbsp;·&nbsp; Shivaji Science College, Nagpur</p>
+    </div>
+    <div class="dh-pill">Score: <b>{sc}</b> &nbsp;|&nbsp; Stage <b>{min(stg,5)}/5</b></div>
   </div>
-  <div class="dh-pill">Score: <b>{sc}</b> &nbsp;|&nbsp; Stage <b>{min(stg,5)}/5</b></div>
 </div>
 """, unsafe_allow_html=True)
 
@@ -296,6 +312,73 @@ st.divider()
 
 if cur == 1:
     st.subheader("Stage 1 — Identify the target")
+
+    # ── Case summary card ─────────────────────────────────────────────────
+    target_class = {
+        "COX-2": "Enzyme (Cyclooxygenase)",
+        "ACE": "Enzyme (Metallopeptidase)",
+        "AChE": "Enzyme (Hydrolase)",
+        "PDE5": "Enzyme (Phosphodiesterase)",
+        "Pf-DHFR": "Enzyme (Reductase)",
+        "β2-adrenergic receptor": "GPCR (Receptor)",
+        "SERT": "Transporter (SLC family)",
+        "Histamine H1 receptor": "GPCR (Receptor)",
+        "5-HT1B receptor": "GPCR (Receptor)",
+        "MAO-B": "Enzyme (Oxidoreductase)",
+        "Nav1.2 (Na+ channel)": "Ion Channel",
+        "Bacterial DNA gyrase": "Enzyme (Topoisomerase)",
+        "InhA": "Enzyme (Reductase)",
+        "Neuraminidase": "Enzyme (Glycosidase)",
+        "HIV-1 Reverse Transcriptase": "Enzyme (Polymerase)",
+        "Carbonic Anhydrase II": "Enzyme (Lyase)",
+        "Dopamine D2 receptor": "GPCR (Receptor)",
+        "Xanthine Oxidase": "Enzyme (Oxidoreductase)",
+        "H+/K+ ATPase": "Enzyme (ATPase)",
+        "FPPS": "Enzyme (Transferase)",
+    }.get(case.get("target_protein",""), "Molecular target")
+
+    pdb = case.get("target_pdb","")
+    off = case.get("off_target","")
+    off_pdb = case.get("off_target_pdb","")
+    best = next((c for c in case.get("candidates",[]) if c.get("kind")=="best"), None)
+    drug_name = best["name"] if best else "unknown"
+
+    st.markdown(f"""
+    <div style="background:linear-gradient(135deg,#0D1B2A,#1A3A5C);
+                border-radius:12px;padding:1.2rem 1.4rem;margin-bottom:1rem;
+                border-left:4px solid #1DE9B6;">
+      <div style="color:#1DE9B6;font-size:.75rem;font-weight:600;
+                  letter-spacing:1px;margin-bottom:8px;">📋 CASE SUMMARY</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;">
+        <div>
+          <div style="color:#90CAF9;font-size:.68rem;">DISEASE</div>
+          <div style="color:#fff;font-size:.9rem;font-weight:600;">{case['disease']}</div>
+        </div>
+        <div>
+          <div style="color:#90CAF9;font-size:.68rem;">TARGET PROTEIN</div>
+          <div style="color:#fff;font-size:.9rem;font-weight:600;">{case.get('target_protein','')}</div>
+          <div style="color:#90CAF9;font-size:.65rem;">{target_class} · PDB: {pdb}</div>
+        </div>
+        <div>
+          <div style="color:#90CAF9;font-size:.68rem;">KEY DRUG</div>
+          <div style="color:#1DE9B6;font-size:.9rem;font-weight:600;">{drug_name}</div>
+        </div>
+        <div>
+          <div style="color:#90CAF9;font-size:.68rem;">OFF-TARGET (side effect)</div>
+          <div style="color:#FFD54F;font-size:.9rem;font-weight:600;">{off}</div>
+          <div style="color:#90CAF9;font-size:.65rem;">PDB: {off_pdb}</div>
+        </div>
+      </div>
+      <div style="margin-top:10px;padding-top:10px;border-top:1px solid rgba(255,255,255,.1);">
+        <div style="color:#90CAF9;font-size:.68rem;margin-bottom:4px;">🎯 WHAT YOU WILL LEARN</div>
+        <div style="color:#E0E0E0;font-size:.82rem;line-height:1.6;">
+          Identify the molecular target → locate the binding pocket in 3D →
+          dock candidate ligands using real AutoDock Vina → test selectivity
+          (target vs {off}) → check drug-likeness (Lipinski's Rule of Five).
+        </div>
+      </div>
+    </div>
+    """, unsafe_allow_html=True)
 
     # Patient card
     p = case["patient"]
@@ -700,17 +783,19 @@ elif cur == 5:
         st.rerun()
 
 # ─────────────────────────────────────────────────────────────────────────────
-# STAGE 6 — FINAL RESULT
+# STAGE 6 — FINAL RESULT + FULL CASE SUMMARY
 # ─────────────────────────────────────────────────────────────────────────────
 
 else:
-    sc = st.session_state.score
+    sc  = st.session_state.score
+    top = st.session_state.s3_top
 
     if sc >= 90:   icon, rank = "🥇", "Master Medicinal Chemist"
     elif sc >= 70: icon, rank = "🥈", "Drug Designer"
     elif sc >= 50: icon, rank = "🥉", "Junior Chemist"
     else:          icon, rank = "📚", "Back to the Textbooks"
 
+    # ── Score card ────────────────────────────────────────────────────────
     st.markdown(f"""
     <div class="fin-box">
         <div style="font-size:3rem;">{icon}</div>
@@ -728,6 +813,251 @@ else:
                      for b in st.session_state.badges),
             unsafe_allow_html=True
         )
+
+    st.divider()
+
+    # ── FULL CASE SUMMARY ─────────────────────────────────────────────────
+    st.subheader("📚 Case Summary — What you learned")
+
+    target   = case.get("target_protein","")
+    pdb      = case.get("target_pdb","")
+    off      = case.get("off_target","")
+    off_pdb  = case.get("off_target_pdb","")
+    best_cand = next((c for c in case.get("candidates",[]) if c.get("kind")=="best"), None)
+    alt_cand  = next((c for c in case.get("candidates",[]) if c.get("kind")=="alt"),  None)
+
+    # ── 1. Disease & Target overview ──────────────────────────────────────
+    st.markdown("#### 🦠 Disease & Molecular Target")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        st.markdown(f"""
+        <div class="info-box">
+            <b>Disease</b><br>{case['disease']}<br><br>
+            <b>Target protein</b><br>{target}<br>
+            <span style="font-size:.8rem;color:#475569;">PDB: {pdb}</span><br><br>
+            <b>Difficulty</b><br>{case['difficulty']}
+        </div>""", unsafe_allow_html=True)
+    with c2:
+        st.markdown(f"""
+        <div class="wrn-box">
+            <b>Off-target (side effect source)</b><br>{off}<br>
+            <span style="font-size:.8rem;">PDB: {off_pdb}</span><br><br>
+            <b>Why selectivity matters</b><br>
+            <span style="font-size:.85rem;">
+            The drug must bind <b>strongly</b> to {target}
+            but <b>weakly</b> to {off}.
+            If both are inhibited equally, side effects appear.
+            </span>
+        </div>""", unsafe_allow_html=True)
+
+    # ── 2. Protein 3D viewer ──────────────────────────────────────────────
+    st.markdown("#### 🔬 Target Protein Structure")
+    st.caption(f"{target} · PDB: {pdb} · Rotate with mouse, scroll to zoom")
+
+    try:
+        import py3Dmol
+        view = py3Dmol.view(query=f"pdb:{pdb}", width=680, height=380)
+        view.setStyle({}, {"cartoon": {"color": "spectrum"}})
+        # Show surface of the binding site in a translucent style
+        view.addSurface(
+            py3Dmol.VDW,
+            {"opacity": 0.6, "color": "white"},
+            {"hetflag": True}
+        )
+        view.setStyle({"hetflag": True},
+                      {"stick": {"colorscheme": "greenCarbon", "radius": 0.3}})
+        view.zoomTo()
+        view.spin(False)
+        st.components.v1.html(view._make_html(), height=400)
+        st.caption(
+            "🟢 Green sticks = co-crystallised ligand (defines the binding pocket). "
+            "White surface = Van der Waals surface of pocket."
+        )
+    except Exception:
+        st.info(
+            f"💡 View the 3D structure at "
+            f"[rcsb.org/structure/{pdb}](https://www.rcsb.org/structure/{pdb}) "
+            f"and [rcsb.org/structure/{off_pdb}](https://www.rcsb.org/structure/{off_pdb})"
+        )
+
+    # ── 3. Drug comparison table ──────────────────────────────────────────
+    st.markdown("#### 💊 Drug Candidates — Comparison")
+
+    rows = []
+    for cand in case.get("candidates", []):
+        kind_label = {
+            "best": "⭐ Best (selective)",
+            "alt":  "🔵 Alternative",
+            "weak": "🟡 Weak binder",
+            "decoy":"⚫ Decoy",
+        }.get(cand.get("kind",""), cand.get("kind",""))
+
+        admet_data = _admet(case).get(cand["name"], {})
+        admet_ok   = admet_data.get("ok") or admet_data.get("pass", "—")
+
+        sel_data   = _selectivity(case).get(cand["name"], {})
+        selective  = ("✅ Yes" if sel_data.get("pass") else "❌ No") if sel_data else "—"
+
+        rows.append({
+            "Drug":       cand["name"],
+            "Role":       kind_label,
+            "Description":cand["desc"],
+            "Selective?": selective,
+            "Lipinski OK":("✅" if admet_ok else "❌") if admet_data else "—",
+        })
+
+    st.dataframe(
+        pd.DataFrame(rows),
+        use_container_width=True,
+        hide_index=True
+    )
+
+    # ── 4. Binding affinity chart ─────────────────────────────────────────
+    st.markdown("#### 📊 Binding Affinity — Target vs Off-target")
+
+    def _get_score(cid, name, ptype="target"):
+        import json, os
+        f = "docking_results.json"
+        if os.path.exists(f):
+            try:
+                d = json.load(open(f))
+                return d.get(f"{cid}_{name}_{ptype}")
+            except Exception:
+                return None
+        return None
+
+    score_map   = {"best": -9.5, "alt": -8.8, "weak": -7.0, "decoy": -4.5}
+    cand_names  = [c["name"] for c in case.get("candidates",[])]
+    t_scores    = []
+    o_scores    = []
+    has_real    = False
+
+    for cand in case.get("candidates",[]):
+        rs = _get_score(case["id"], cand["name"], "target")
+        if rs is not None:
+            t_scores.append(rs); has_real = True
+        else:
+            t_scores.append(score_map.get(cand.get("kind","decoy"), -4.5))
+        ro = _get_score(case["id"], cand["name"], "off_target")
+        if ro is not None:
+            o_scores.append(ro)
+        else:
+            # Estimate off-target as weaker than target for best/alt
+            base = t_scores[-1]
+            o_scores.append(base + (2.5 if cand.get("kind") in ("best","alt") else 0.5))
+
+    colors_t = ["#1A7A6E" if c.get("kind") in ("best","alt")
+                else "#E8A020" if c.get("kind") == "weak"
+                else "#9E9E9E"
+                for c in case.get("candidates",[])]
+
+    fig = go.Figure()
+    fig.add_trace(go.Bar(
+        name="vs Target (want: low)",
+        x=cand_names, y=t_scores,
+        marker_color=colors_t,
+        text=[f"{s:.1f}" for s in t_scores],
+        textposition="outside",
+    ))
+    fig.add_trace(go.Bar(
+        name="vs Off-target (want: high)",
+        x=cand_names, y=o_scores,
+        marker_color=["rgba(255,200,0,0.5)"] * len(o_scores),
+        text=[f"{s:.1f}" for s in o_scores],
+        textposition="outside",
+        marker_line=dict(color="gold", width=1.5),
+    ))
+    fig.update_layout(
+        barmode="group",
+        title=f"Binding affinity (kcal/mol) — {'Real Vina scores' if has_real else 'Illustrative — run precompute_docking.py for real scores'}",
+        yaxis_title="Binding affinity (kcal/mol)",
+        legend=dict(orientation="h", yanchor="bottom", y=1.02),
+        height=380,
+        plot_bgcolor="rgba(0,0,0,0)",
+        paper_bgcolor="rgba(0,0,0,0)",
+    )
+    st.plotly_chart(fig, use_container_width=True)
+    st.caption(
+        "Green bars = target affinity (more negative = stronger binding = better drug). "
+        "Yellow bars = off-target affinity (should be less negative = weaker = safer)."
+    )
+
+    # ── 5. ADMET radar for the best drug ─────────────────────────────────
+    if best_cand:
+        admet_best = _admet(case).get(best_cand["name"], {})
+        if admet_best:
+            st.markdown(f"#### ⚗️ Drug Properties — {best_cand['name']}")
+
+            radar_vals   = [
+                min(1.0, 500 / max(admet_best.get("MW", 500), 1)),
+                min(1.0, max(0, (5 - admet_best.get("LogP", 5)) / 5.5)),
+                min(1.0, (5 - admet_best.get("HBD", 5)) / 5),
+                min(1.0, (10 - admet_best.get("HBA", 10)) / 10),
+                min(1.0, (10 - admet_best.get("RotBonds", 10)) / 10),
+            ]
+            radar_vals = [max(0, v) for v in radar_vals]
+            radar_labels = ["MW<br><500", "LogP<br>1-3", "HBD<br>≤5", "HBA<br>≤10", "RotBonds<br>≤10"]
+
+            fig2 = go.Figure(go.Scatterpolar(
+                r=radar_vals + [radar_vals[0]],
+                theta=radar_labels + [radar_labels[0]],
+                fill="toself",
+                fillcolor="rgba(26,122,110,0.3)",
+                line=dict(color="#1A7A6E", width=2),
+                name=best_cand["name"],
+            ))
+            fig2.update_layout(
+                polar=dict(radialaxis=dict(visible=True, range=[0, 1])),
+                title=f"{best_cand['name']} — Lipinski Drug-likeness Radar",
+                height=380,
+                paper_bgcolor="rgba(0,0,0,0)",
+            )
+            c1, c2 = st.columns([3, 2])
+            with c1:
+                st.plotly_chart(fig2, use_container_width=True)
+            with c2:
+                st.markdown(f"""
+                <div class="info-box" style="margin-top:1rem;">
+                    <b>MW:</b> {admet_best.get('MW','—')} Da<br>
+                    <b>LogP:</b> {admet_best.get('LogP','—')}<br>
+                    <b>H-bond donors:</b> {admet_best.get('HBD','—')}<br>
+                    <b>H-bond acceptors:</b> {admet_best.get('HBA','—')}<br>
+                    <b>Rotatable bonds:</b> {admet_best.get('RotBonds','—')}<br><br>
+                    <b>Lipinski:</b>
+                    {'✅ Compliant' if (admet_best.get('ok') or admet_best.get('pass')) else '⚠️ Exceptions'}<br><br>
+                    {f'<span style="color:#e65100">{admet_best.get("warning","")}</span>' if admet_best.get('warning') else ''}
+                </div>""", unsafe_allow_html=True)
+
+    # ── 6. Key learning points ────────────────────────────────────────────
+    st.markdown("#### 🎓 Key Learning Points")
+
+    sel_msg = ""
+    if best_cand:
+        sel_data = _selectivity(case).get(best_cand["name"], {})
+        sel_msg  = sel_data.get("msg","") if sel_data else ""
+
+    st.markdown(f"""
+    <div style="background:#F0FDF4;border-left:4px solid #16A34A;
+                border-radius:8px;padding:1rem 1.2rem;color:#14532D;">
+    <ol style="margin:0;padding-left:1.2rem;line-height:2;">
+        <li><b>Target:</b> {target} is the key enzyme/receptor in <b>{case['disease']}</b>.</li>
+        <li><b>Binding site:</b> The drug binds in a specific pocket — identified using the PDB structure ({pdb}).</li>
+        <li><b>Best drug:</b> <b>{best_cand['name'] if best_cand else 'N/A'}</b> shows the strongest and most selective binding.</li>
+        <li><b>Selectivity:</b> {sel_msg if sel_msg else f'The drug must be selective for {target} over {off} to avoid side effects.'}</li>
+        <li><b>Drug-likeness:</b> Lipinski's Rule of Five filters out molecules that are unlikely to be orally bioavailable.</li>
+    </ol>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.markdown(f"""
+    <div style="background:#EFF6FF;border-left:4px solid #3B82F6;
+                border-radius:8px;padding:.8rem 1.2rem;margin-top:.75rem;color:#1E3A5F;font-size:.85rem;">
+    📖 <b>Further reading:</b> Search PubChem for {best_cand['name'] if best_cand else 'the drug'} ·
+    View the 3D complex at <a href="https://www.rcsb.org/structure/{pdb}" target="_blank">RCSB PDB {pdb}</a> ·
+    Explore off-target at <a href="https://www.rcsb.org/structure/{off_pdb}" target="_blank">RCSB PDB {off_pdb}</a>
+    </div>
+    """, unsafe_allow_html=True)
 
     st.divider()
     col1, col2 = st.columns(2)
