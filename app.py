@@ -11,6 +11,33 @@ import pandas as pd
 import plotly.graph_objects as go
 from cases import CASES
 
+# ── Key compatibility helper ──────────────────────────────────────────────────
+# Old cases.py used: stage1_question, stage1_options, pocket_regions
+# New cases.py uses: question, options, pocket_options
+# This function reads either format so both files work.
+
+def _get(case, *keys, default=None):
+    """Read the first key that exists in the case dict."""
+    for k in keys:
+        if k in case:
+            return case[k]
+    return default
+
+def _q(case):
+    return _get(case, "question", "stage1_question", default="")
+
+def _opts(case):
+    return _get(case, "options", "stage1_options", default=[])
+
+def _pocket_opts(case):
+    return _get(case, "pocket_options", "pocket_regions", default=[])
+
+def _selectivity(case):
+    return _get(case, "selectivity", "selectivity_data", default={})
+
+def _admet(case):
+    return _get(case, "admet", default={})
+
 # ─────────────────────────────────────────────────────────────────────────────
 # PAGE SETUP
 # ─────────────────────────────────────────────────────────────────────────────
@@ -281,10 +308,10 @@ if cur == 1:
 
     if not st.session_state.s1_done:
         with st.form("form_s1"):
-            st.markdown(f"**{case['question']}**")
+            st.markdown(f"**{_q(case)}**")
             choice = st.radio(
                 "Select your answer:",
-                [o["text"] for o in case["options"]],
+                [o["text"] for o in _opts(case)],
                 key="s1_radio",
                 label_visibility="collapsed",
             )
@@ -294,8 +321,7 @@ if cur == 1:
                 use_container_width=True,
             )
         if ok:
-            # find selected option
-            opt = next(o for o in case["options"] if o["text"] == choice)
+            opt = next(o for o in _opts(case) if o["text"] == choice)
             st.session_state.s1_ok  = opt["correct"]
             st.session_state.s1_msg = opt["feedback"]
             st.session_state.s1_done = True
@@ -352,7 +378,7 @@ elif cur == 2:
             st.markdown("**Which region is the drug binding pocket?**")
             choice = st.radio(
                 "Select region:",
-                [o["text"] for o in case["pocket_options"]],
+                [o["text"] for o in _pocket_opts(case)],
                 key="s2_radio",
                 label_visibility="collapsed",
             )
@@ -362,7 +388,7 @@ elif cur == 2:
                 use_container_width=True,
             )
         if ok:
-            opt = next(o for o in case["pocket_options"] if o["text"] == choice)
+            opt = next(o for o in _pocket_opts(case) if o["text"] == choice)
             st.session_state.s2_ok  = opt["correct"]
             st.session_state.s2_msg = opt["feedback"]
             st.session_state.s2_done = True
@@ -518,7 +544,7 @@ elif cur == 3:
         )
         st.plotly_chart(fig, use_container_width=True)
 
-        can_go = top["name"] in case.get("selectivity", {})
+        can_go = top["name"] in _selectivity(case)
 
         if top["kind"] in ("best", "alt") and can_go:
             st.markdown(
@@ -561,7 +587,7 @@ elif cur == 4:
             st.rerun()
         st.stop()
 
-    sel = case.get("selectivity", {}).get(top["name"])
+    sel = _selectivity(case).get(top["name"])
     if not sel:
         st.warning("No selectivity data for this candidate.")
         if st.button("Continue →", type="primary", use_container_width=True):
@@ -632,7 +658,7 @@ elif cur == 5:
     st.subheader("Stage 5 — ADMET & drug-likeness")
 
     top   = st.session_state.s3_top
-    admet = case.get("admet", {}).get(top["name"] if top else "", {}) if top else {}
+    admet = _admet(case).get(top["name"] if top else "", {}) if top else {}
 
     if not admet:
         st.warning("No ADMET data for this candidate.")
@@ -657,7 +683,8 @@ elif cur == 5:
     st.dataframe(df, use_container_width=True, hide_index=True)
 
     if not st.session_state.s5_done:
-        if admet.get("ok"):
+        admet_ok = admet.get("ok") or admet.get("pass", False)
+        if admet_ok:
             _pts(15); _badge("💎 Lipinski Compliant")
         if admet.get("warning"):
             st.markdown(
