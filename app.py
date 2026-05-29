@@ -77,7 +77,8 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-.block-container { padding-top:0.5rem !important; }
+/* INCREASED PADDING HERE to pull the whole app down slightly */
+.block-container { padding-top: 2rem !important; }
 
 /* ── Override Streamlit theme for game title ─────────────────────────────
    Use .stMarkdown prefix for higher specificity than Streamlit's own rules */
@@ -170,10 +171,12 @@ case = CASES[st.session_state.case_idx]
 sc   = st.session_state.score
 stg  = st.session_state.stage
 
+# ADDED MARGIN-TOP: 20px HERE
 st.markdown(f"""
 <table width="100%" cellpadding="0" cellspacing="0"
   style="background:linear-gradient(135deg,#0D1B2A 0%,#1A3A5C 100%);
          border-radius:12px;border-left:6px solid #1DE9B6;
+         margin-top:20px;
          margin-bottom:14px;border-collapse:collapse;">
   <tr>
     <td style="padding:14px 20px 12px;vertical-align:middle;">
