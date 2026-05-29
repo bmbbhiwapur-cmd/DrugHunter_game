@@ -77,7 +77,8 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-.block-container { padding-top:0.5rem !important; }
+/* INCREASED PADDING HERE to pull the whole app down slightly */
+.block-container { padding-top: 2rem !important; }
 
 /* ── Override Streamlit theme for game title ─────────────────────────────
    Use .stMarkdown prefix for higher specificity than Streamlit's own rules */
@@ -170,10 +171,12 @@ case = CASES[st.session_state.case_idx]
 sc   = st.session_state.score
 stg  = st.session_state.stage
 
+# ADDED MARGIN-TOP: 20px HERE
 st.markdown(f"""
 <table width="100%" cellpadding="0" cellspacing="0"
   style="background:linear-gradient(135deg,#0D1B2A 0%,#1A3A5C 100%);
          border-radius:12px;border-left:6px solid #1DE9B6;
+         margin-top:20px;
          margin-bottom:14px;border-collapse:collapse;">
   <tr>
     <td style="padding:14px 20px 12px;vertical-align:middle;">
@@ -211,206 +214,51 @@ st.divider()
 
 if st.session_state.page == "board":
     st.header("🏆 Leaderboard")
-
-    import json, os, io
-    import urllib.request, urllib.parse
+    import json, os
     from datetime import datetime
 
-    # ── Google Sheets helpers ─────────────────────────────────────────────
-
-    def _gsheets_url():
-        try:    return st.secrets.get("GSHEETS_URL", "").strip()
-        except: return ""
-
-    def _gsheets_id():
-        try:    return st.secrets.get("GSHEETS_ID", "").strip()
-        except: return ""
-
-    def _send_to_sheets(player, case_title, score, badges):
-        """Send score to Google Sheets via Apps Script GET request."""
-        url = _gsheets_url()
-        if not url:
-            return False, "GSHEETS_URL not set in secrets"
-        try:
-            params = urllib.parse.urlencode({
-                "action":    "write",
-                "player":    player[:30],
-                "case_name": case_title,
-                "score":     str(score),
-                "badges":    ", ".join(badges),
-            })
-            full_url = f"{url}?{params}"
-            req = urllib.request.Request(full_url,
-                      headers={"User-Agent": "DrugHunter/1.0"})
-            with urllib.request.urlopen(req, timeout=15) as resp:
-                result = json.loads(resp.read().decode("utf-8"))
-                if result.get("status") == "success":
-                    return True, "Saved to Google Sheets ✅"
-                return False, result.get("message", "Unknown error")
-        except Exception as e:
-            return False, f"Network error: {e}"
-
-    def _read_from_sheets():
-        """Read leaderboard rows from Google Sheets via published CSV."""
-        sid = _gsheets_id()
-        if not sid:
-            return None
-        try:
-            url = (f"https://docs.google.com/spreadsheets/d/{sid}"
-                   f"/export?format=csv&gid=0")
-            req = urllib.request.Request(url,
-                      headers={"User-Agent": "DrugHunter/1.0"})
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                content = resp.read().decode("utf-8")
-            if not content.strip():
-                return []
-            df_lb = pd.read_csv(io.StringIO(content))
-            # Normalise column names to lowercase
-            df_lb.columns = [c.lower() for c in df_lb.columns]
-            rows_out = []
-            for _, row in df_lb.iterrows():
-                rows_out.append({
-                    "player": str(row.get("player","")),
-                    "case":   str(row.get("case","")),
-                    "score":  int(float(row.get("score", 0))),
-                    "badges": str(row.get("badges","")),
-                    "date":   str(row.get("date","")),
-                })
-            return rows_out
-        except Exception:
-            return None
-
-    # Local JSON fallback
     LB_FILE = "leaderboard.json"
 
-    def _load_local():
+    def _load_lb():
         if os.path.exists(LB_FILE):
-            try:   return json.load(open(LB_FILE))
-            except: return []
+            try:
+                return json.load(open(LB_FILE))
+            except Exception:
+                return []
         return []
 
-    def _save_local(rows):
-        rows.sort(key=lambda x: x.get("score",0), reverse=True)
-        json.dump(rows[:500], open(LB_FILE,"w"), indent=2)
+    def _save_lb(rows):
+        rows.sort(key=lambda x: x["score"], reverse=True)
+        json.dump(rows[:200], open(LB_FILE,"w"), indent=2)
 
-    # ── Status banner ─────────────────────────────────────────────────────
-    gurl = _gsheets_url()
-    gid  = _gsheets_id()
-
-    if gurl and gid:
-        st.success("🟢 Google Sheets connected — global leaderboard active.")
-    elif gurl:
-        st.warning("🟡 GSHEETS_URL set but GSHEETS_ID missing. "
-                   "Set both in Streamlit secrets to show global leaderboard.")
+    rows = _load_lb()
+    if not rows:
+        st.info("No scores yet. Play a case to be first on the board!")
     else:
-        st.info("🔵 Running in local mode. "
-                "Set GSHEETS_URL and GSHEETS_ID in Streamlit secrets "
-                "to enable the global leaderboard.")
-        with st.expander("📋 How to set up Google Sheets"):
-            st.markdown("""
-**Step 1 — Create the Apps Script**
-1. Open a new Google Sheet
-2. Click **Extensions → Apps Script**
-3. Delete all existing code
-4. Paste the contents of `google_apps_script.js` (in your repo)
-5. Click **Save**
+        df = pd.DataFrame(rows[:20])
+        df.index = range(1, len(df)+1)
+        st.dataframe(df[["player","case","score","date"]].rename(
+            columns={"player":"Player","case":"Case",
+                     "score":"Score","date":"Date"}
+        ), use_container_width=True, hide_index=False)
 
-**Step 2 — Deploy as Web App**
-1. Click **Deploy → New deployment**
-2. Type: **Web app**
-3. Execute as: **Me**
-4. Who has access: **Anyone**
-5. Click **Deploy** → copy the **Web app URL**
-
-**Step 3 — Share the Sheet for reading**
-1. Back in your Google Sheet, click **Share**
-2. Change to **Anyone with the link → Viewer**
-3. Copy the Sheet ID from the URL:
-   `https://docs.google.com/spreadsheets/d/**SHEET_ID**/edit`
-
-**Step 4 — Add to Streamlit secrets**
-
-Go to your app on share.streamlit.io → **⋮ → Settings → Secrets** and add:
-```toml
-GSHEETS_URL = "https://script.google.com/macros/s/YOUR_SCRIPT_ID/exec"
-GSHEETS_ID  = "YOUR_SHEET_ID"
-```
-""")
-
-    # ── Display leaderboard ───────────────────────────────────────────────
-    st.subheader("🏆 Top scores")
-
-    # Try Google Sheets first, fall back to local
-    lb_rows = _read_from_sheets() if (gurl and gid) else None
-    if lb_rows is None:
-        lb_rows = _load_local()
-
-    if not lb_rows:
-        st.info("No scores yet — be the first!")
-    else:
-        df_show = pd.DataFrame(lb_rows[:25])
-        medals  = ["🥇","🥈","🥉"] + [f"#{i}" for i in range(4, 26)]
-        df_show.insert(0, "Rank", medals[:len(df_show)])
-        cols = [c for c in ["Rank","player","case","score","badges","date"]
-                if c in df_show.columns]
-        df_show = df_show[cols].rename(columns={
-            "player":"Player","case":"Case",
-            "score":"Score","badges":"Badges","date":"Date"
-        })
-        st.dataframe(df_show, use_container_width=True, hide_index=True)
-
-        if len(lb_rows) >= 3:
-            c1, c2, c3 = st.columns(3)
-            c1.metric("🥇 " + lb_rows[0]["player"],
-                      f"{lb_rows[0]['score']} pts", lb_rows[0].get("case",""))
-            c2.metric("🥈 " + lb_rows[1]["player"],
-                      f"{lb_rows[1]['score']} pts", lb_rows[1].get("case",""))
-            c3.metric("🥉 " + lb_rows[2]["player"],
-                      f"{lb_rows[2]['score']} pts", lb_rows[2].get("case",""))
-
-    # ── Submit score ──────────────────────────────────────────────────────
     st.divider()
-    st.subheader("📊 Submit your score")
-    st.caption(f"Current game: **{case['title']}** · Score: **{st.session_state.score}**")
-
-    with st.form("lb_submit"):
-        player_name = st.text_input("Your name", max_chars=30,
-                                    placeholder="e.g. Rahul Sharma")
-        submitted   = st.form_submit_button("🏆 Submit score",
-                                            type="primary",
-                                            use_container_width=True)
-
-    if submitted and player_name.strip():
-        entry = dict(
-            player = player_name.strip(),
-            case   = case["title"],
-            score  = st.session_state.score,
-            badges = ", ".join(st.session_state.get("badges", [])),
-            date   = datetime.now().strftime("%Y-%m-%d"),
-        )
-
-        # Try Google Sheets
-        sheets_ok = False
-        if gurl:
-            with st.spinner("Sending to Google Sheets…"):
-                sheets_ok, msg = _send_to_sheets(
-                    entry["player"], entry["case"],
-                    entry["score"],
-                    st.session_state.get("badges", [])
-                )
-            if sheets_ok:
-                st.success(f"✅ {msg}")
-            else:
-                st.warning(f"Google Sheets failed: {msg}. Saving locally.")
-
-        # Always save locally as backup
-        local_rows = _load_local()
-        local_rows.append(entry)
-        _save_local(local_rows)
-
-        if not sheets_ok:
-            st.success("✅ Score saved locally!")
-
+    st.subheader("Submit your score")
+    with st.form("lb_form"):
+        name = st.text_input("Your name", max_chars=30)
+        sub  = st.form_submit_button("Submit my last score",
+                                      type="primary",
+                                      use_container_width=True)
+    if sub and name.strip():
+        rows = _load_lb()
+        rows.append(dict(
+            player=name.strip(),
+            case=case["title"],
+            score=st.session_state.score,
+            date=datetime.now().strftime("%Y-%m-%d"),
+        ))
+        _save_lb(rows)
+        st.success("Score saved!")
         st.rerun()
 
     st.stop()
