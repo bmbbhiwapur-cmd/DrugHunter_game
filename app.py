@@ -38,6 +38,32 @@ def _selectivity(case):
 def _admet(case):
     return _get(case, "admet", default={})
 
+# ── Key binding-site residues for each target ──────────────────────────────
+# These are the amino acid residues that line the binding pocket
+# and directly interact with the drug molecule.
+BINDING_RESIDUES = {
+    "COX-2":                     ["Arg120", "Tyr355", "Val523", "Ser530", "Tyr385", "His513", "Phe381", "Leu384"],
+    "ACE":                       ["Zn²⁺(His383·His387·Glu411)", "Glu143", "Tyr523", "Lys511", "Ala354", "His353"],
+    "AChE":                      ["Ser203", "His447", "Glu334", "Trp86", "Tyr337", "Phe338", "Trp430", "Tyr341"],
+    "PDE5":                      ["Gln817", "Phe820", "Tyr612", "Met816", "Ile768", "Asp764", "Leu765"],
+    "Pf-DHFR":                   ["Phe58", "Ile14", "Asp54", "Leu46", "Met55", "Ser108", "Asn108"],
+    "β2-adrenergic receptor":    ["Asp113", "Asn312", "Ser204", "Ser207", "Phe290", "Trp286", "Tyr316"],
+    "SERT":                      ["Tyr95", "Asp98", "Ala169", "Ile172", "Ser438", "Thr439", "Phe341"],
+    "Histamine H1 receptor":     ["Asp107", "Tyr108", "Lys191", "Asn198", "Trp428", "Phe432", "Thr194"],
+    "5-HT1B receptor":           ["Asp129", "Thr200", "Ser204", "Phe330", "Asn331", "Ile228", "Trp327"],
+    "MAO-B":                     ["FAD·N5", "Tyr398", "Tyr435", "Ile199", "Ile316", "Gln206", "Cys172"],
+    "Nav1.2 (Na+ channel)":      ["Phe1764", "Tyr1771", "Leu1465", "Ile1468", "Asn1472", "Asp1714"],
+    "Bacterial DNA gyrase":      ["Arg121", "Glu50", "Asp73", "Lys103", "His80", "Arg136", "Gly77"],
+    "InhA":                      ["NAD·N1", "Ile194", "Met98", "Met103", "Phe149", "Ile202", "Ala198"],
+    "Neuraminidase":             ["Arg118", "Arg292", "Arg371", "Glu119", "Arg152", "Trp178", "Ile222"],
+    "HIV-1 Reverse Transcriptase":["Lys101", "Lys103", "Tyr181", "Tyr188", "Glu138", "Val179", "Pro236"],
+    "Carbonic Anhydrase II":     ["Zn²⁺(His94·His96·His119)", "Thr199", "Glu106", "Thr200", "Pro202"],
+    "Dopamine D2 receptor":      ["Asp114", "Val115", "Cys118", "Ser193", "Ser194", "Phe390", "His393"],
+    "Xanthine Oxidase":          ["Mo-pterin", "Phe914", "Glu802", "Arg880", "Thr1010", "Leu873"],
+    "H+/K+ ATPase":              ["Cys813", "Cys822", "Cys892", "Lys791", "Glu820", "His811"],
+    "FPPS":                      ["Lys200", "Arg112", "Asp103", "Asp107", "Arg60", "Tyr204", "Gln96"],
+}
+
 # ─────────────────────────────────────────────────────────────────────────────
 # PAGE SETUP
 # ─────────────────────────────────────────────────────────────────────────────
@@ -51,48 +77,32 @@ st.set_page_config(
 
 st.markdown("""
 <style>
-/* layout */
-.block-container { padding-top: 0.5rem !important; }
+.block-container { padding-top:0.5rem !important; }
 
-/* ── TOP BAR — prominent game name ──────────────────────── */
-.dh-bar {
-    background: linear-gradient(135deg, #0D1B2A 0%, #1A3A5C 100%);
-    border-radius: 12px;
-    padding: 14px 20px 12px;
-    margin-bottom: 14px;
-    border-left: 5px solid #1A7A6E;
+/* ── Override Streamlit theme for game title ─────────────────────────────
+   Use .stMarkdown prefix for higher specificity than Streamlit's own rules */
+.stMarkdown .dh-T {
+    font-size:1.75rem !important; font-weight:900 !important;
+    color:#FFFFFF !important; margin:0 !important; padding:0 !important;
+    line-height:1.15 !important; display:block !important;
 }
-.dh-top-row {
-    display: flex; align-items: center;
-    justify-content: space-between; flex-wrap: wrap; gap: 8px;
+.stMarkdown .dh-A { color:#1DE9B6 !important; font-weight:900 !important; }
+.stMarkdown .dh-S {
+    font-size:0.72rem !important; color:#90CAF9 !important;
+    display:block !important; margin:3px 0 0 !important;
 }
-.dh-name-block { display: flex; flex-direction: column; gap: 2px; }
-.dh-game-name {
-    font-size: 1.6rem !important; font-weight: 800 !important;
-    color: #FFFFFF !important; margin: 0 !important; line-height: 1.2;
-    letter-spacing: 0.5px;
-}
-.dh-game-name span { color: #1DE9B6 !important; }
-.dh-sub { font-size: .72rem; color: #90CAF9 !important; margin: 0; }
-.dh-pill {
-    background: rgba(255,255,255,.12);
-    border: 1px solid rgba(255,255,255,.2);
-    border-radius: 20px; padding: 5px 16px;
-    font-size: .82rem; color: #fff !important; white-space: nowrap;
-}
-.dh-pill b { color: #FFD54F !important; font-size: .95rem; }
+.stMarkdown .dh-P { color:#FFFFFF !important; font-size:0.85rem !important; white-space:nowrap !important; }
+.stMarkdown .dh-N { color:#FFD54F !important; font-weight:700 !important; font-size:1rem !important; }
 
 /* stepper */
 .dh-step-row { display:flex; align-items:center; margin:14px 0 8px; }
 .dh-circle   { width:28px; height:28px; border-radius:50%; display:flex;
                align-items:center; justify-content:center;
                font-size:.75rem; font-weight:700; flex-shrink:0; }
-.done-c  { background:#1A7A6E; color:#fff; }
-.now-c   { background:#1565C0; color:#fff;
-           box-shadow:0 0 0 3px rgba(21,101,192,.25); }
-.todo-c  { background:#E2E8F0; color:#94A3B8; }
-.dh-lbl  { font-size:.6rem; text-align:center; margin-top:3px;
-           color:#64748B; line-height:1.2; }
+.done-c { background:#1A7A6E; color:#fff; }
+.now-c  { background:#1565C0; color:#fff; box-shadow:0 0 0 3px rgba(21,101,192,.25); }
+.todo-c { background:#E2E8F0; color:#94A3B8; }
+.dh-lbl  { font-size:.6rem; text-align:center; margin-top:3px; color:#64748B; line-height:1.2; }
 .now-lbl { color:#1565C0; font-weight:600; }
 .done-lbl{ color:#1A7A6E; }
 .dh-line { flex:1; height:3px; border-radius:2px; margin-bottom:16px; }
@@ -100,38 +110,21 @@ st.markdown("""
 .todo-ln { background:#E2E8F0; }
 
 /* feedback boxes */
-.ok-box  { background:#e8f5e9 !important; color:#1b5e20 !important;
-           border-left:4px solid #2e7d32;
-           padding:.9rem 1rem; border-radius:8px; margin:.6rem 0; }
-.ok-box *{ color:#1b5e20 !important; }
-.err-box { background:#ffebee !important; color:#b71c1c !important;
-           border-left:4px solid #c62828;
-           padding:.9rem 1rem; border-radius:8px; margin:.6rem 0; }
+.ok-box   { background:#e8f5e9 !important; color:#1b5e20 !important; border-left:4px solid #2e7d32; padding:.9rem 1rem; border-radius:8px; margin:.6rem 0; }
+.ok-box * { color:#1b5e20 !important; }
+.err-box  { background:#ffebee !important; color:#b71c1c !important; border-left:4px solid #c62828; padding:.9rem 1rem; border-radius:8px; margin:.6rem 0; }
 .err-box *{ color:#b71c1c !important; }
-.wrn-box { background:#fff8e1 !important; color:#e65100 !important;
-           border-left:4px solid #f57f17;
-           padding:.9rem 1rem; border-radius:8px; margin:.6rem 0; }
+.wrn-box  { background:#fff8e1 !important; color:#e65100 !important; border-left:4px solid #f57f17; padding:.9rem 1rem; border-radius:8px; margin:.6rem 0; }
 .wrn-box *{ color:#e65100 !important; }
-.info-box{ background:#eef2ff !important; color:#1a1a2e !important;
-           border-left:4px solid #5b6cff;
-           padding:.9rem 1rem; border-radius:8px; margin:.6rem 0; }
+.info-box { background:#eef2ff !important; color:#1a1a2e !important; border-left:4px solid #5b6cff; padding:.9rem 1rem; border-radius:8px; margin:.6rem 0; }
 .info-box *{ color:#1a1a2e !important; }
+.fin-box  { background:#eef2ff; color:#1a1a2e; border:2px solid #5b6cff; border-radius:12px; padding:1.5rem; text-align:center; margin-bottom:1rem; }
+.badge    { display:inline-block; background:#e3f2fd !important; color:#0d47a1 !important; padding:3px 10px; border-radius:12px; font-size:.82rem; margin:3px; }
 
-/* result card */
-.fin-box { background:#eef2ff; color:#1a1a2e; border:2px solid #5b6cff;
-           border-radius:12px; padding:1.5rem; text-align:center;
-           margin-bottom:1rem; }
-
-/* badge */
-.badge { display:inline-block; background:#e3f2fd !important;
-         color:#0d47a1 !important; padding:3px 10px;
-         border-radius:12px; font-size:.82rem; margin:3px; }
-
-/* mobile */
 @media(max-width:600px){
-    .dh-title { font-size:1.05rem; }
-    .dh-circle{ width:22px; height:22px; font-size:.62rem; }
-    .dh-lbl   { font-size:.55rem; }
+    .stMarkdown .dh-T { font-size:1.2rem !important; }
+    .dh-circle { width:22px; height:22px; font-size:.62rem; }
+    .dh-lbl    { font-size:.55rem; }
 }
 </style>
 """, unsafe_allow_html=True)
@@ -178,28 +171,24 @@ sc   = st.session_state.score
 stg  = st.session_state.stage
 
 st.markdown(f"""
-<div style="background:linear-gradient(135deg,#0D1B2A 0%,#1A3A5C 100%);
-            border-radius:12px;padding:16px 20px 14px;margin-bottom:14px;
-            border-left:6px solid #1DE9B6;">
-  <div style="display:flex;align-items:center;
-              justify-content:space-between;flex-wrap:wrap;gap:8px;">
-    <div>
-      <div style="font-size:1.7rem;font-weight:800;color:#FFFFFF;
-                  line-height:1.1;letter-spacing:0.3px;">
-        🧬 Drug<span style="color:#1DE9B6;">Hunter</span>
-      </div>
-      <div style="font-size:0.72rem;color:#90CAF9;margin-top:3px;">
-        By Sarang Dhote &nbsp;·&nbsp; Shivaji Science College, Nagpur
-      </div>
-    </div>
-    <div style="background:rgba(255,255,255,0.12);border:1px solid rgba(255,255,255,0.2);
-                border-radius:20px;padding:6px 18px;font-size:0.85rem;color:#FFFFFF;">
-      Score: <span style="color:#FFD54F;font-weight:700;font-size:1rem;">{sc}</span>
-      &nbsp;|&nbsp; Stage
-      <span style="color:#FFD54F;font-weight:700;font-size:1rem;">{min(stg,5)}/5</span>
-    </div>
-  </div>
-</div>
+<table width="100%" cellpadding="0" cellspacing="0"
+  style="background:linear-gradient(135deg,#0D1B2A 0%,#1A3A5C 100%);
+         border-radius:12px;border-left:6px solid #1DE9B6;
+         margin-bottom:14px;border-collapse:collapse;">
+  <tr>
+    <td style="padding:14px 20px 12px;vertical-align:middle;">
+      <p class="dh-T">&#x1F9EC; Drug<span class="dh-A">Hunter</span></p>
+      <span class="dh-S">By Sarang Dhote &nbsp;&middot;&nbsp; Shivaji Science College, Nagpur</span>
+    </td>
+    <td style="padding:14px 20px 12px;text-align:right;vertical-align:middle;">
+      <span style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.25);
+                   border-radius:20px;padding:6px 16px;">
+        <span class="dh-P">Score:&nbsp;<span class="dh-N">{sc}</span>
+        &nbsp;|&nbsp;Stage&nbsp;<span class="dh-N">{min(stg,5)}/5</span></span>
+      </span>
+    </td>
+  </tr>
+</table>
 """, unsafe_allow_html=True)
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -911,6 +900,65 @@ elif cur == 5:
     ])
     st.dataframe(df, use_container_width=True, hide_index=True)
 
+    # ── Key binding-site residues ─────────────────────────────────────────
+    target   = case.get("target_protein","")
+    pdb      = case.get("target_pdb","")
+    residues = BINDING_RESIDUES.get(target, [])
+    if residues:
+        res_html = "".join(
+            f'<span style="background:#E8F5E9;color:#1B5E20;border:1px solid #A5D6A7;'
+            f'border-radius:5px;padding:3px 10px;margin:3px 2px;display:inline-block;'
+            f'font-family:monospace;font-size:.82rem;font-weight:700;">{r}</span>'
+            for r in residues
+        )
+        st.markdown(f"""
+        <div style="background:#F1F8E9;border-left:4px solid #558B2F;
+                    border-radius:8px;padding:.9rem 1rem;margin:.75rem 0;">
+            <b style="color:#33691E;font-size:.85rem;">
+                🔬 Key binding-site residues — {target}
+            </b><br>
+            <span style="color:#558B2F;font-size:.75rem;">
+                These amino acids directly contact <b>{top['name']}</b> inside the binding pocket.
+                Each residue forms H-bonds, hydrophobic contacts, or ionic interactions with the drug.
+            </span><br><br>
+            {res_html}
+        </div>
+        """, unsafe_allow_html=True)
+
+    # ── Binding site 3D viewer — zoomed to where drug goes ────────────────
+    st.markdown("**📍 Where does the drug bind? — 3D view zoomed to binding pocket**")
+    st.caption(
+        "🟢 Green sticks = drug / co-crystal ligand sitting in the pocket  ·  "
+        "🔵 Blue = receptor protein cartoon  ·  Rotate: drag  ·  Zoom: scroll"
+    )
+    try:
+        import py3Dmol
+        view = py3Dmol.view(query=f"pdb:{pdb}", width=680, height=380)
+        # Protein: pale blue cartoon, semi-transparent
+        view.setStyle({}, {"cartoon": {"color": "#90CAF9", "opacity": 0.55}})
+        # Co-crystal ligand: green sticks + spheres — this IS where the drug goes
+        view.setStyle({"hetflag": True}, {
+            "stick":   {"colorscheme": "greenCarbon", "radius": 0.25},
+            "sphere":  {"colorscheme": "greenCarbon", "radius": 0.35},
+        })
+        # Yellow semi-transparent surface around the ligand = binding pocket shape
+        view.addSurface(py3Dmol.VDW,
+                        {"opacity": 0.5, "color": "#FFD54F"},
+                        {"hetflag": True})
+        # Zoom camera directly onto the ligand — students see the pocket immediately
+        view.zoomTo({"hetflag": True})
+        view.zoom(1.6)
+        view.addLabel(
+            f" ← {top['name']} binds here ",
+            {"fontColor": "#FFFFFF", "backgroundColor": "#1A7A6E",
+             "fontSize": 12, "borderRadius": 4, "padding": 4,
+             "inFront": True},
+            {"hetflag": True}
+        )
+        st.components.v1.html(view._make_html(), height=400)
+    except Exception:
+        st.info(f"💡 View binding site at [rcsb.org/structure/{pdb}](https://www.rcsb.org/structure/{pdb})")
+
     if not st.session_state.s5_done:
         admet_ok = admet.get("ok") or admet.get("pass", False)
         if admet_ok:
@@ -997,34 +1045,76 @@ else:
             </span>
         </div>""", unsafe_allow_html=True)
 
-    # ── 2. Protein 3D viewer ──────────────────────────────────────────────
-    st.markdown("#### 🔬 Target Protein Structure")
-    st.caption(f"{target} · PDB: {pdb} · Rotate with mouse, scroll to zoom")
+    # ── 2. Protein 3D viewer — focused on binding site ────────────────────
+    st.markdown("#### 🔬 Where the Drug Binds — Interactive 3D View")
+    st.caption(
+        f"**{target}** (PDB: {pdb})  ·  Rotate: click & drag  ·  Zoom: scroll  ·  "
+        f"🟡 Yellow pocket = binding site  ·  🟢 Green sticks = co-crystallised ligand"
+    )
 
     try:
         import py3Dmol
-        view = py3Dmol.view(query=f"pdb:{pdb}", width=680, height=380)
-        view.setStyle({}, {"cartoon": {"color": "spectrum"}})
-        # Show surface of the binding site in a translucent style
+        view = py3Dmol.view(query=f"pdb:{pdb}", width=700, height=420)
+
+        # Whole protein: faded light-grey cartoon
+        view.setStyle({}, {"cartoon": {"color": "lightgrey", "opacity": 0.7}})
+
+        # Co-crystallised ligand (if present): bright green sticks — shows EXACTLY where drug goes
+        view.setStyle({"hetflag": True},
+                      {"stick": {"colorscheme": "greenCarbon", "radius": 0.28}})
         view.addSurface(
             py3Dmol.VDW,
-            {"opacity": 0.6, "color": "white"},
+            {"opacity": 0.55, "colorscheme": {"prop": "b", "map": {0: "#FFB300"}}},
             {"hetflag": True}
         )
-        view.setStyle({"hetflag": True},
-                      {"stick": {"colorscheme": "greenCarbon", "radius": 0.3}})
-        view.zoomTo()
-        view.spin(False)
-        st.components.v1.html(view._make_html(), height=400)
-        st.caption(
-            "🟢 Green sticks = co-crystallised ligand (defines the binding pocket). "
-            "White surface = Van der Waals surface of pocket."
+
+        # Zoom into the ligand / binding pocket (not the whole protein)
+        view.zoomTo({"hetflag": True})
+        view.zoom(1.4)
+
+        # Annotation arrow pointing to the pocket
+        view.addLabel(
+            f"Drug binding pocket",
+            {"fontColor": "white", "backgroundColor": "#1A7A6E",
+             "fontSize": 13, "borderRadius": 5, "padding": 4},
+            {"hetflag": True}
         )
-    except Exception:
+
+        st.components.v1.html(view._make_html(), height=440)
+
+        # Explanation box
+        residues = BINDING_RESIDUES.get(target, [])
+        res_str  = " · ".join(residues[:6]) + (" ..." if len(residues) > 6 else "")
+        st.markdown(f"""
+        <table width="100%" style="border-collapse:collapse;margin-top:8px;">
+          <tr>
+            <td width="50%" style="padding:8px;background:#E8F5E9;border-radius:8px 0 0 8px;
+                                    vertical-align:top;">
+              <b style="color:#1B5E20;">🟢 Green sticks</b><br>
+              <span style="font-size:.82rem;color:#2E7D32;">
+                Co-crystallised ligand — this sits <b>exactly in the binding pocket</b>.
+                Your drug (e.g. {best_cand['name'] if best_cand else 'the drug'}) binds in the same site.
+              </span>
+            </td>
+            <td width="50%" style="padding:8px;background:#FFF8E1;border-radius:0 8px 8px 0;
+                                    vertical-align:top;">
+              <b style="color:#E65100;">🟡 Yellow surface</b><br>
+              <span style="font-size:.82rem;color:#BF360C;">
+                Van der Waals surface of the binding pocket.
+                Key residues lining this pocket: <b>{res_str}</b>
+              </span>
+            </td>
+          </tr>
+        </table>
+        """, unsafe_allow_html=True)
+
+    except Exception as e:
+        pdb_url     = f"https://www.rcsb.org/structure/{pdb}"
+        off_pdb_url = f"https://www.rcsb.org/structure/{off_pdb}"
         st.info(
             f"💡 View the 3D structure at "
-            f"[rcsb.org/structure/{pdb}](https://www.rcsb.org/structure/{pdb}) "
-            f"and [rcsb.org/structure/{off_pdb}](https://www.rcsb.org/structure/{off_pdb})"
+            f"[RCSB PDB {pdb}]({pdb_url}).  "
+            f"Off-target: [RCSB PDB {off_pdb}]({off_pdb_url})"
         )
 
     # ── 3. Drug comparison table ──────────────────────────────────────────
@@ -1178,20 +1268,28 @@ else:
     # ── 6. Key learning points ────────────────────────────────────────────
     st.markdown("#### 🎓 Key Learning Points")
 
-    sel_msg = ""
+    sel_msg  = ""
     if best_cand:
-        sel_data = _selectivity(case).get(best_cand["name"], {})
-        sel_msg  = sel_data.get("msg","") if sel_data else ""
+        sd = _selectivity(case).get(best_cand["name"], {})
+        sel_msg = sd.get("msg","") if sd else ""
+
+    residues = BINDING_RESIDUES.get(target, [])
+    res_short = ", ".join(residues[:4]) + (" ..." if len(residues) > 4 else "")
 
     st.markdown(f"""
     <div style="background:#F0FDF4;border-left:4px solid #16A34A;
                 border-radius:8px;padding:1rem 1.2rem;color:#14532D;">
-    <ol style="margin:0;padding-left:1.2rem;line-height:2;">
-        <li><b>Target:</b> {target} is the key enzyme/receptor in <b>{case['disease']}</b>.</li>
-        <li><b>Binding site:</b> The drug binds in a specific pocket — identified using the PDB structure ({pdb}).</li>
-        <li><b>Best drug:</b> <b>{best_cand['name'] if best_cand else 'N/A'}</b> shows the strongest and most selective binding.</li>
-        <li><b>Selectivity:</b> {sel_msg if sel_msg else f'The drug must be selective for {target} over {off} to avoid side effects.'}</li>
-        <li><b>Drug-likeness:</b> Lipinski's Rule of Five filters out molecules that are unlikely to be orally bioavailable.</li>
+    <ol style="margin:0;padding-left:1.2rem;line-height:2.1;">
+        <li><b>Disease mechanism:</b> In <b>{case['disease']}</b>, the key molecular event
+            involves <b>{target}</b>.</li>
+        <li><b>Binding pocket:</b> The drug binds in a specific cavity lined by residues
+            <b>{res_short}</b> — identifiable in PDB structure {pdb}.</li>
+        <li><b>Best drug:</b> <b>{best_cand['name'] if best_cand else 'N/A'}</b> shows
+            the strongest binding because its shape complements the pocket geometry.</li>
+        <li><b>Selectivity:</b> {sel_msg if sel_msg else
+            f'The drug must bind strongly to {target} but weakly to {off}.'}</li>
+        <li><b>Drug-likeness:</b> Lipinski's Rule of Five (MW&lt;500, LogP&lt;5,
+            HBD≤5, HBA≤10) predicts oral bioavailability before in vivo testing.</li>
     </ol>
     </div>
     """, unsafe_allow_html=True)
