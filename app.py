@@ -181,7 +181,7 @@ st.markdown(f"""
   <tr>
     <td style="padding:14px 20px 12px;vertical-align:middle;">
       <p class="dh-T">&#x1F9EC; Drug<span class="dh-A">Hunter</span></p>
-      <span class="dh-S">By Sarang Dhote &nbsp;&middot;&nbsp; Shivaji Science College, Nagpur</span>
+      <span class="dh-S">By Shgufta Basir &nbsp;&middot;&nbsp; Shivaji Science College, Nagpur</span>
     </td>
     <td style="padding:14px 20px 12px;text-align:right;vertical-align:middle;">
       <span style="background:rgba(255,255,255,0.15);border:1px solid rgba(255,255,255,0.25);
