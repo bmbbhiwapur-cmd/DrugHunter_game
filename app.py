@@ -1,6 +1,6 @@
 """
 Drug Hunter — Educational Game
-Developed by Sarang Dhote, Shivaji Science College, Nagpur
+Developed by Shagufta Basir, Shivaji Science College, Nagpur
 
 Every interactive question uses st.form() — the most reliable
 Streamlit pattern for multi-choice questions.
